@@ -20,6 +20,10 @@ const stopShareBtn = document.getElementById('stopShareBtn');
 const screensContainer = document.getElementById('screensContainer');
 const statusIndicator = document.getElementById('statusIndicator');
 const noContent = document.getElementById('noContent');
+const inviteLinkInput = document.getElementById('inviteLinkInput');
+const copyInviteBtn = document.getElementById('copyInviteBtn');
+const copyIdBtn = document.getElementById('copyIdBtn');
+const inviteId = document.getElementById('inviteId');
 
 let currentServerId = null;
 let currentChannelId = null;
@@ -42,12 +46,14 @@ function openModal(mode) {
         serverNameInput.style.display = 'block';
         serverIdInput.classList.add('hidden');
         serverIdInput.style.display = 'none';
+        serverNameInput.focus();
     } else {
         modalTitle.textContent = 'Entrar em Servidor';
         serverNameInput.classList.add('hidden');
         serverNameInput.style.display = 'none';
         serverIdInput.classList.remove('hidden');
         serverIdInput.style.display = 'block';
+        serverIdInput.focus();
     }
 }
 
@@ -59,34 +65,35 @@ function closeModal() {
     serverModal.style.display = 'none';
 }
 
+// ================= FUNÇÃO DE CONVITE =================
+function updateInviteLink(serverId) {
+    const baseUrl = window.location.origin;
+    const inviteUrl = `${baseUrl}/?server=${serverId}`;
+    inviteLinkInput.value = inviteUrl;
+    inviteId.textContent = serverId;
+}
+
 // ================= EVENTOS DOS BOTÕES =================
 createServerBtn.addEventListener('click', () => {
-    console.log('Botão criar servidor clicado');
     openModal('create');
 });
 
 joinServerBtn.addEventListener('click', () => {
-    console.log('Botão entrar servidor clicado');
     openModal('join');
 });
 
 cancelServerBtn.addEventListener('click', () => {
-    console.log('Botão cancelar clicado');
     closeModal();
 });
 
 confirmServerBtn.addEventListener('click', () => {
-    console.log('Botão confirmar clicado');
-    
     if (modalTitle.textContent === 'Criar Servidor') {
         const name = serverNameInput.value.trim() || 'Meu Servidor';
-        console.log('Criando servidor:', name);
         closeModal();
         socket.emit('create-server', name);
     } else {
         const serverId = serverIdInput.value.trim();
         if (serverId) {
-            console.log('Entrando no servidor:', serverId);
             closeModal();
             socket.emit('join-server', serverId);
         } else {
@@ -122,38 +129,45 @@ serverIdInput.addEventListener('keypress', (e) => {
     }
 });
 
+// Copiar link de convite
+copyInviteBtn.addEventListener('click', () => {
+    inviteLinkInput.select();
+    inviteLinkInput.setSelectionRange(0, 99999);
+    document.execCommand('copy');
+    alert('✅ Link copiado!');
+});
+
+// Copiar ID
+copyIdBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(currentServerId).then(() => {
+        alert('✅ ID copiado!');
+    });
+});
+
 // ================= SOCKET EVENTS =================
 socket.on('connect', () => {
-    console.log('Conectado ao servidor');
+    console.log('✅ Conectado ao servidor');
 });
 
 socket.on('disconnect', () => {
-    console.log('Desconectado do servidor');
+    console.log('❌ Desconectado do servidor');
 });
 
 socket.on('server-created', (data) => {
-    console.log('Servidor criado:', data);
+    console.log('🎉 Servidor criado:', data);
     currentServerId = data.serverId;
     sidebar.classList.remove('hidden');
     serverName.textContent = data.serverName;
-    serverLink.textContent = `ID: ${data.serverId}`;
-    serverLink.onclick = () => {
-        navigator.clipboard.writeText(data.serverId);
-        alert('ID copiado!');
-    };
+    updateInviteLink(data.serverId);
     socket.emit('join-server', data.serverId);
 });
 
 socket.on('server-info', (data) => {
-    console.log('Info do servidor:', data);
+    console.log('📋 Info do servidor:', data);
     currentServerId = data.id;
     sidebar.classList.remove('hidden');
     serverName.textContent = data.name;
-    serverLink.textContent = `ID: ${data.id}`;
-    serverLink.onclick = () => {
-        navigator.clipboard.writeText(data.id);
-        alert('ID copiado!');
-    };
+    updateInviteLink(data.id);
     
     channelList.innerHTML = '';
     data.channels.forEach(channel => {
@@ -166,12 +180,12 @@ socket.on('server-info', (data) => {
 });
 
 socket.on('channel-created', (channel) => {
-    console.log('Canal criado:', channel);
+    console.log('➕ Canal criado:', channel);
     addChannelToList(channel);
 });
 
 socket.on('user-joined', (data) => {
-    console.log('Usuário entrou:', data.userId);
+    console.log('👤 Usuário entrou:', data.userId);
     if (isSharing) {
         createPeerConnection(data.userId);
         const pc = peerConnections.get(data.userId);
@@ -188,7 +202,7 @@ socket.on('user-joined', (data) => {
 });
 
 socket.on('existing-streamers', (streamers) => {
-    console.log('Streamers existentes:', streamers);
+    console.log('📡 Streamers existentes:', streamers);
     streamers.forEach(streamerId => {
         if (streamerId !== socket.id) {
             createPeerConnection(streamerId);
@@ -197,7 +211,7 @@ socket.on('existing-streamers', (streamers) => {
 });
 
 socket.on('offer', async (data) => {
-    console.log('Recebida oferta de:', data.from);
+    console.log('📥 Recebida oferta de:', data.from);
     if (!isSharing && localStream) {
         createPeerConnection(data.from);
         const pc = peerConnections.get(data.from);
@@ -238,7 +252,7 @@ socket.on('ice-candidate', async (data) => {
 });
 
 socket.on('user-left', (userId) => {
-    console.log('Usuário saiu:', userId);
+    console.log('👋 Usuário saiu:', userId);
     if (peerConnections.has(userId)) {
         peerConnections.get(userId).close();
         peerConnections.delete(userId);
@@ -247,7 +261,7 @@ socket.on('user-left', (userId) => {
 });
 
 socket.on('error', (error) => {
-    console.error('Erro:', error);
+    console.error('⚠️ Erro:', error);
     alert('Erro: ' + error);
 });
 
@@ -262,7 +276,7 @@ function addChannelToList(channel) {
 }
 
 function joinChannel(channel) {
-    console.log('Entrando no canal:', channel.name);
+    console.log('🔗 Entrando no canal:', channel.name);
     currentChannelId = channel.id;
     socket.emit('join-channel', { channelId: channel.id });
     
@@ -318,7 +332,7 @@ async function startScreenShare() {
         isSharing = true;
         shareScreenBtn.classList.add('hidden');
         stopShareBtn.classList.remove('hidden');
-        statusIndicator.textContent = 'AO VIVO';
+        statusIndicator.textContent = '🟢 AO VIVO';
         statusIndicator.classList.remove('hidden');
         statusIndicator.classList.add('live');
         
@@ -348,7 +362,7 @@ function stopScreenShare() {
     isSharing = false;
     shareScreenBtn.classList.remove('hidden');
     stopShareBtn.classList.add('hidden');
-    statusIndicator.textContent = 'NÃO ESTÁ TRANSMITINDO';
+    statusIndicator.textContent = '🔴 NÃO ESTÁ TRANSMITINDO';
     statusIndicator.classList.remove('live');
     
     removeLocalVideo();
@@ -378,7 +392,7 @@ function createPeerConnection(userId) {
     }
     
     pc.ontrack = (event) => {
-        console.log('Recebendo track remota de:', userId);
+        console.log('📺 Recebendo track remota de:', userId);
         addRemoteVideo(userId, event.streams[0]);
     };
     
@@ -410,7 +424,7 @@ function addLocalVideo(stream) {
     
     const label = document.createElement('div');
     label.className = 'screen-label';
-    label.textContent = 'Sua tela';
+    label.textContent = '🖥️ Sua tela';
     
     videoContainer.appendChild(video);
     videoContainer.appendChild(label);
@@ -438,7 +452,7 @@ function addRemoteVideo(userId, stream) {
     
     const label = document.createElement('div');
     label.className = 'screen-label';
-    label.textContent = `Tela de ${userId.slice(0, 8)}`;
+    label.textContent = `🖥️ Tela de ${userId.slice(0, 8)}`;
     
     videoContainer.appendChild(video);
     videoContainer.appendChild(label);
@@ -456,6 +470,16 @@ function removeRemoteVideo(userId) {
 shareScreenBtn.addEventListener('click', startScreenShare);
 stopShareBtn.addEventListener('click', stopScreenShare);
 
+// ================= AUTO-ENTRAR VIA LINK =================
+window.addEventListener('load', () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const serverId = urlParams.get('server');
+    if (serverId) {
+        console.log('🔗 Entrando via link:', serverId);
+        socket.emit('join-server', serverId);
+    }
+});
+
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
     if (localStream) {
@@ -465,8 +489,7 @@ window.addEventListener('beforeunload', () => {
 });
 
 console.log('🚀 App carregado com sucesso!');
-console.log('📝 Para testar:');
-console.log('   1. Clique em "Criar Servidor"');
-console.log('   2. Digite um nome');
-console.log('   3. Clique em "Confirmar"');
-console.log('   4. O modal DEVE fechar');
+console.log('📝 Como usar:');
+console.log('   1. Crie um servidor ou entre em um existente');
+console.log('   2. Compartilhe o link de convite');
+console.log('   3. Clique em "Compartilhar Tela" para transmitir');
