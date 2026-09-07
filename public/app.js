@@ -12,7 +12,6 @@ const joinServerBtn = document.getElementById('joinServerBtn');
 const sidebar = document.getElementById('sidebar');
 const serverName = document.getElementById('serverName');
 const serverLink = document.getElementById('serverLink');
-const channelList = document.getElementById('channelList');
 const createChannelBtn = document.getElementById('createChannelBtn');
 const shareScreenBtn = document.getElementById('shareScreenBtn');
 const stopShareBtn = document.getElementById('stopShareBtn');
@@ -23,9 +22,10 @@ const inviteLinkInput = document.getElementById('inviteLinkInput');
 const copyInviteBtn = document.getElementById('copyInviteBtn');
 const copyIdBtn = document.getElementById('copyIdBtn');
 const inviteId = document.getElementById('inviteId');
+const hiddenScreensBox = document.getElementById('hiddenScreensBox');
+const hiddenScreensList = document.getElementById('hiddenScreensList');
 
 let currentServerId = null;
-let currentChannelId = null;
 let localStream = null;
 let isSharing = false;
 let modalOpen = false;
@@ -129,7 +129,8 @@ socket.on('server-created', (data) => {
     sidebar.classList.remove('hidden');
     serverName.textContent = data.serverName;
     updateInviteLink(data.serverId);
-    socket.emit('join-server', data.serverId);
+    shareScreenBtn.classList.remove('hidden');
+    noContent.classList.add('hidden');
 });
 
 socket.on('server-info', (data) => {
@@ -137,22 +138,10 @@ socket.on('server-info', (data) => {
     sidebar.classList.remove('hidden');
     serverName.textContent = data.name;
     updateInviteLink(data.id);
-    
-    channelList.innerHTML = '';
-    data.channels.forEach(channel => {
-        addChannelToList(channel);
-    });
-    
-    if (data.channels.length > 0) {
-        joinChannel(data.channels[0]);
-    }
+    shareScreenBtn.classList.remove('hidden');
+    noContent.classList.add('hidden');
 });
 
-socket.on('channel-created', (channel) => {
-    addChannelToList(channel);
-});
-
-// ============ WEBRTC EVENTS ============
 socket.on('user-joined', (data) => {
     console.log('👤 Usuário entrou:', data.userId);
     
@@ -184,7 +173,6 @@ socket.on('stream-stopped', (data) => {
         peerConnections.get(data.userId).close();
         peerConnections.delete(data.userId);
     }
-    hiddenStreams.delete(data.userId);
 });
 
 socket.on('offer', async (data) => {
@@ -241,53 +229,11 @@ socket.on('user-left', (userId) => {
         peerConnections.get(userId).close();
         peerConnections.delete(userId);
     }
-    hiddenStreams.delete(userId);
 });
 
 socket.on('error', (error) => {
     console.error('⚠️ Erro:', error);
     alert('Erro: ' + error);
-});
-
-// ================= CANAIS =================
-function addChannelToList(channel) {
-    const li = document.createElement('li');
-    li.className = 'channel-item';
-    li.textContent = `# ${channel.name}`;
-    li.dataset.channelId = channel.id;
-    li.addEventListener('click', () => joinChannel(channel));
-    channelList.appendChild(li);
-}
-
-function joinChannel(channel) {
-    currentChannelId = channel.id;
-    socket.emit('join-channel', { channelId: channel.id });
-    
-    document.querySelectorAll('.channel-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    
-    const channelElement = document.querySelector(`[data-channel-id="${channel.id}"]`);
-    if (channelElement) {
-        channelElement.classList.add('active');
-    }
-    
-    shareScreenBtn.classList.remove('hidden');
-    noContent.classList.add('hidden');
-    
-    console.log('🔗 Entrou no canal:', channel.name);
-}
-
-createChannelBtn.addEventListener('click', () => {
-    if (currentServerId) {
-        const channelName = prompt('Nome do canal:');
-        if (channelName && channelName.trim()) {
-            socket.emit('create-channel', { 
-                serverId: currentServerId, 
-                channelName: channelName.trim() 
-            });
-        }
-    }
 });
 
 // ================= WEBRTC =================
@@ -327,8 +273,6 @@ function createPeerConnection(userId, isInitiator) {
             
             if (!hiddenStreams.has(userId)) {
                 addRemoteVideo(userId, stream);
-            } else {
-                console.log('👁️ Stream oculto, não mostrando:', userId);
             }
         }
     };
@@ -383,8 +327,8 @@ async function startScreenShare() {
         
         addLocalVideo(localStream);
         
-        if (currentChannelId) {
-            socket.emit('start-stream', { channelId: currentChannelId });
+        if (currentServerId) {
+            socket.emit('start-stream', {});
         }
         
         localStream.getTracks().forEach(track => {
@@ -419,8 +363,8 @@ function stopScreenShare() {
     });
     peerConnections.clear();
     
-    if (currentChannelId) {
-        socket.emit('stop-stream', { channelId: currentChannelId });
+    if (currentServerId) {
+        socket.emit('stop-stream', {});
     }
 }
 
@@ -500,53 +444,64 @@ function toggleScreen(userId) {
     const isVisible = toggleBtn.dataset.visible === 'true';
     
     if (isVisible) {
-        // Parar de ver - NÃO remover, apenas esconder o vídeo
+        // Parar de ver
         hiddenStreams.add(userId);
-        video.srcObject = null;
-        video.style.display = 'none';
-        toggleBtn.textContent = '👁️ Ver Tela';
-        toggleBtn.dataset.visible = 'false';
-        toggleBtn.style.background = 'rgba(76, 175, 80, 0.8)';
-        toggleBtn.style.position = 'absolute';
-        toggleBtn.style.top = '50%';
-        toggleBtn.style.left = '50%';
-        toggleBtn.style.transform = 'translate(-50%, -50%)';
-        toggleBtn.style.bottom = 'auto';
-        toggleBtn.style.right = 'auto';
-        toggleBtn.style.fontSize = '1.2rem';
-        toggleBtn.style.padding = '15px 25px';
-        
-        // Manter o container visível com fundo escuro
-        videoContainer.style.background = '#2a2a2a';
-        videoContainer.style.display = 'flex';
-        videoContainer.style.alignItems = 'center';
-        videoContainer.style.justifyContent = 'center';
-        
+        videoContainer.style.display = 'none';
+        addToHiddenList(userId);
         console.log('🚫 Parou de ver tela de:', userId);
     } else {
         // Voltar a ver
         hiddenStreams.delete(userId);
-        video.srcObject = streamData.stream;
-        video.style.display = 'block';
-        toggleBtn.textContent = '🚫 Parar de Ver Tela';
-        toggleBtn.dataset.visible = 'true';
-        toggleBtn.style.background = 'rgba(244, 67, 54, 0.8)';
-        toggleBtn.style.position = 'absolute';
-        toggleBtn.style.top = 'auto';
-        toggleBtn.style.left = 'auto';
-        toggleBtn.style.transform = 'none';
-        toggleBtn.style.bottom = '10px';
-        toggleBtn.style.right = '10px';
-        toggleBtn.style.fontSize = '0.9rem';
-        toggleBtn.style.padding = '8px 12px';
-        
-        // Restaurar container
-        videoContainer.style.background = '#000';
         videoContainer.style.display = 'block';
-        
+        video.srcObject = streamData.stream;
+        removeFromHiddenList(userId);
         console.log('👁️ Voltou a ver tela de:', userId);
     }
 }
+
+function addToHiddenList(userId) {
+    hiddenScreensBox.classList.remove('hidden');
+    
+    const li = document.createElement('li');
+    li.className = 'hidden-screen-item';
+    li.id = `hidden-item-${userId}`;
+    li.innerHTML = `
+        <span>Tela de ${userId.slice(0, 8)}</span>
+        <button onclick="showHiddenScreen('${userId}')">👁️ Ver</button>
+    `;
+    hiddenScreensList.appendChild(li);
+}
+
+function removeFromHiddenList(userId) {
+    const hiddenItem = document.getElementById(`hidden-item-${userId}`);
+    if (hiddenItem) {
+        hiddenItem.remove();
+    }
+    
+    if (hiddenScreensList.children.length === 0) {
+        hiddenScreensBox.classList.add('hidden');
+    }
+}
+
+function showHiddenScreen(userId) {
+    const streamData = remoteStreams.get(userId);
+    if (!streamData) return;
+    
+    const { videoContainer, video } = streamData;
+    const toggleBtn = videoContainer.querySelector('.toggle-screen-btn');
+    
+    hiddenStreams.delete(userId);
+    videoContainer.style.display = 'block';
+    video.srcObject = streamData.stream;
+    toggleBtn.textContent = '🚫 Parar de Ver Tela';
+    toggleBtn.dataset.visible = 'true';
+    
+    removeFromHiddenList(userId);
+    console.log('👁️ Voltou a ver tela de:', userId);
+}
+
+window.showHiddenScreen = showHiddenScreen;
+
 function removeRemoteVideo(userId) {
     const videoContainer = document.getElementById(`remote-video-${userId}`);
     if (videoContainer) {
@@ -554,6 +509,7 @@ function removeRemoteVideo(userId) {
     }
     remoteStreams.delete(userId);
     hiddenStreams.delete(userId);
+    removeFromHiddenList(userId);
 }
 
 // ================= EVENT LISTENERS =================
@@ -578,4 +534,3 @@ window.addEventListener('beforeunload', () => {
 });
 
 console.log('🚀 App carregado com sucesso!');
-console.log('📝 Sistema de visualização seletiva ativado');
