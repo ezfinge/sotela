@@ -314,22 +314,18 @@ function createPeerConnection(userId, isInitiator) {
     const pc = new RTCPeerConnection(configuration);
     peerConnections.set(userId, pc);
     
-    // Adicionar tracks locais se estiver compartilhando
     if (localStream) {
         localStream.getTracks().forEach(track => {
             pc.addTrack(track, localStream);
-            console.log('➕ Track adicionada:', track.kind);
         });
     }
     
-    // Receber stream remoto
     pc.ontrack = (event) => {
         console.log('📺 Recebendo stream de:', userId);
         
         if (event.streams.length > 0) {
             const stream = event.streams[0];
             
-            // Se o stream não está na lista de ocultos, mostrar
             if (!hiddenStreams.has(userId)) {
                 addRemoteVideo(userId, stream);
             } else {
@@ -338,7 +334,6 @@ function createPeerConnection(userId, isInitiator) {
         }
     };
     
-    // ICE Candidate
     pc.onicecandidate = (event) => {
         if (event.candidate) {
             socket.emit('ice-candidate', {
@@ -348,16 +343,13 @@ function createPeerConnection(userId, isInitiator) {
         }
     };
     
-    // Estado da conexão
     pc.onconnectionstatechange = () => {
         console.log('🔄 Estado da conexão com', userId, ':', pc.connectionState);
     };
     
-    // Se for iniciador, criar oferta
     if (isInitiator) {
         pc.createOffer()
             .then(offer => {
-                console.log('📤 Oferta criada para:', userId);
                 return pc.setLocalDescription(offer);
             })
             .then(() => {
@@ -374,99 +366,9 @@ function createPeerConnection(userId, isInitiator) {
     return pc;
 }
 
-async function startScreenShare() {
-    try {
-        localStream = await navigator.mediaDevices.getDisplayMedia({
-            video: {
-                cursor: "always"
-            },
-            audio: true
-        });
-        
-        isSharing = true;
-        shareScreenBtn.classList.add('hidden');
-        stopShareBtn.classList.remove('hidden');
-        statusIndicator.textContent = '🟢 AO VIVO';
-        statusIndicator.classList.remove('hidden');
-        statusIndicator.classList.add('live');
-        
-        addLocalVideo(localStream);
-        
-        if (currentChannelId) {
-            socket.emit('start-stream', { channelId: currentChannelId });
-        }
-        
-        localStream.getTracks().forEach(track => {
-            track.onended = () => {
-                stopScreenShare();
-            };
-        });
-        
-        console.log('✅ Compartilhamento iniciado');
-    } catch (error) {
-        console.error('❌ Erro ao compartilhar tela:', error);
-        alert('Erro ao compartilhar tela: ' + error.message);
-    }
-}
-
-function stopScreenShare() {
-    if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-    }
-    
-    isSharing = false;
-    shareScreenBtn.classList.remove('hidden');
-    stopShareBtn.classList.add('hidden');
-    statusIndicator.textContent = '🔴 NÃO ESTÁ TRANSMITINDO';
-    statusIndicator.classList.remove('live');
-    
-    removeLocalVideo();
-    
-    peerConnections.forEach((pc) => {
-        pc.close();
-    });
-    peerConnections.clear();
-    
-    if (currentChannelId) {
-        socket.emit('stop-stream', { channelId: currentChannelId });
-    }
-}
-
-function addLocalVideo(stream) {
-    removeLocalVideo();
-    
-    const videoContainer = document.createElement('div');
-    videoContainer.className = 'screen-item';
-    videoContainer.id = 'local-video-container';
-    
-    const video = document.createElement('video');
-    video.id = 'local-video';
-    video.autoplay = true;
-    video.muted = true;
-    video.playsInline = true;
-    video.srcObject = stream;
-    
-    const label = document.createElement('div');
-    label.className = 'screen-label';
-    label.textContent = '🖥️ Sua tela';
-    
-    videoContainer.appendChild(video);
-    videoContainer.appendChild(label);
-    screensContainer.appendChild(videoContainer);
-}
-
-function removeLocalVideo() {
-    const localVideoContainer = document.getElementById('local-video-container');
-    if (localVideoContainer) {
-        localVideoContainer.remove();
-    }
-}
-
 function addRemoteVideo(userId, stream) {
     console.log('➕ Adicionando vídeo remoto de:', userId);
     
-    // Verificar se já existe
     const existingVideo = document.getElementById(`remote-video-${userId}`);
     if (existingVideo) {
         return;
@@ -485,7 +387,6 @@ function addRemoteVideo(userId, stream) {
     label.className = 'screen-label';
     label.textContent = `🖥️ Tela de ${userId.slice(0, 8)}`;
     
-    // Botão para parar de ver
     const toggleBtn = document.createElement('button');
     toggleBtn.className = 'toggle-screen-btn';
     toggleBtn.textContent = '🚫 Parar de Ver Tela';
@@ -502,12 +403,45 @@ function addRemoteVideo(userId, stream) {
     console.log('✅ Vídeo remoto adicionado');
 }
 
+function toggleScreen(userId) {
+    const videoContainer = document.getElementById(`remote-video-${userId}`);
+    if (!videoContainer) return;
+    
+    const video = videoContainer.querySelector('video');
+    const toggleBtn = videoContainer.querySelector('.toggle-screen-btn');
+    const isVisible = toggleBtn.dataset.visible === 'true';
+    
+    if (isVisible) {
+        // Parar de ver
+        hiddenStreams.add(userId);
+        video.srcObject = null;
+        videoContainer.style.display = 'none';
+        toggleBtn.textContent = '👁️ Ver Tela';
+        toggleBtn.dataset.visible = 'false';
+        toggleBtn.style.background = 'rgba(76, 175, 80, 0.8)';
+        console.log('🚫 Parou de ver tela de:', userId);
+    } else {
+        // Voltar a ver
+        hiddenStreams.delete(userId);
+        const streamData = remoteStreams.get(userId);
+        if (streamData) {
+            video.srcObject = streamData.stream;
+            videoContainer.style.display = 'block';
+            toggleBtn.textContent = '🚫 Parar de Ver Tela';
+            toggleBtn.dataset.visible = 'true';
+            toggleBtn.style.background = 'rgba(244, 67, 54, 0.8)';
+            console.log('👁️ Voltou a ver tela de:', userId);
+        }
+    }
+}
+
 function removeRemoteVideo(userId) {
     const videoContainer = document.getElementById(`remote-video-${userId}`);
     if (videoContainer) {
         videoContainer.remove();
     }
     remoteStreams.delete(userId);
+    hiddenStreams.delete(userId);
 }
 
 // ================= FUNÇÃO PARA ALTERNAR VISUALIZAÇÃO =================
