@@ -71,10 +71,22 @@ function closeModal() {
 }
 
 function updateInviteLink(serverId) {
+    console.log('🔗 Gerando link de convite para servidor:', serverId);
+    
     const baseUrl = window.location.origin;
     const inviteUrl = `${baseUrl}/?server=${serverId}`;
+    
+    console.log('📋 Link gerado:', inviteUrl);
+    
+    // Atualizar o input
     inviteLinkInput.value = inviteUrl;
     inviteId.textContent = serverId;
+    
+    // Tornar o input visível
+    inviteLinkInput.style.display = 'block';
+    
+    // Selecionar automaticamente para facilitar cópia
+    inviteLinkInput.select();
 }
 
 // ================= QUALIDADE =================
@@ -191,20 +203,32 @@ socket.on('connect', () => {
 });
 
 socket.on('server-created', (data) => {
+    console.log('🎉 Servidor criado:', data);
     currentServerId = data.serverId;
     sidebar.classList.remove('hidden');
     serverName.textContent = data.serverName;
+    
+    // Gerar link de convite
     updateInviteLink(data.serverId);
+    
     shareScreenBtn.classList.remove('hidden');
     noContent.classList.add('hidden');
     setupServerUI();
+    
+    // Mostrar alerta com o link
+    const inviteUrl = `${window.location.origin}/?server=${data.serverId}`;
+    alert(`✅ Servidor criado!\n\n🔗 Link de convite:\n${inviteUrl}\n\nCompartilhe este link com seus amigos!`);
 });
 
 socket.on('server-info', (data) => {
+    console.log('📋 Informações do servidor:', data);
     currentServerId = data.id;
     sidebar.classList.remove('hidden');
     serverName.textContent = data.name;
+    
+    // Gerar link de convite
     updateInviteLink(data.id);
+    
     shareScreenBtn.classList.remove('hidden');
     noContent.classList.add('hidden');
     setupServerUI();
