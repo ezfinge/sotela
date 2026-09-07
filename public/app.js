@@ -12,7 +12,6 @@ const joinServerBtn = document.getElementById('joinServerBtn');
 const sidebar = document.getElementById('sidebar');
 const serverName = document.getElementById('serverName');
 const serverLink = document.getElementById('serverLink');
-const createChannelBtn = document.getElementById('createChannelBtn');
 const shareScreenBtn = document.getElementById('shareScreenBtn');
 const stopShareBtn = document.getElementById('stopShareBtn');
 const screensContainer = document.getElementById('screensContainer');
@@ -29,9 +28,35 @@ let currentServerId = null;
 let localStream = null;
 let isSharing = false;
 let modalOpen = false;
+let currentQuality = 'medium';
 const peerConnections = new Map();
 const remoteStreams = new Map();
 const hiddenStreams = new Set();
+
+// Configurações de qualidade
+const qualityOptions = {
+    high: {
+        label: 'Alta (1080p)',
+        width: 1920,
+        height: 1080,
+        bitrate: 5000000,
+        fps: 60
+    },
+    medium: {
+        label: 'Média (720p)',
+        width: 1280,
+        height: 720,
+        bitrate: 2500000,
+        fps: 30
+    },
+    low: {
+        label: 'Baixa (480p)',
+        width: 854,
+        height: 480,
+        bitrate: 1000000,
+        fps: 24
+    }
+};
 
 // ================= MODAL =================
 function openModal(mode) {
@@ -70,6 +95,93 @@ function updateInviteLink(serverId) {
     inviteLinkInput.value = inviteUrl;
     inviteId.textContent = serverId;
 }
+
+// ================= CONTROLES DE QUALIDADE =================
+function setQuality(quality) {
+    currentQuality = quality;
+    console.log('🎥 Qualidade alterada para:', quality);
+    
+    if (localStream) {
+        const videoTrack = localStream.getVideoTracks()[0];
+        if (videoTrack) {
+            videoTrack.applyConstraints({
+                width: qualityOptions[quality].width,
+                height: qualityOptions[quality].height,
+                frameRate: qualityOptions[quality].fps
+            }).catch(err => {
+                console.warn('⚠️ Não foi possível aplicar qualidade:', err);
+            });
+        }
+    }
+    
+    document.querySelectorAll('.quality-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activeBtn = document.querySelector(`[data-quality="${quality}"]`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
+    
+    alert(`Qualidade alterada para ${qualityOptions[quality].label}`);
+}
+
+function addQualityControls() {
+    // Remover controles existentes
+    const existingControls = document.querySelector('.quality-controls');
+    if (existingControls) {
+        existingControls.remove();
+    }
+    
+    const qualityContainer = document.createElement('div');
+    qualityContainer.className = 'quality-controls';
+    qualityContainer.innerHTML = '<span>Qualidade:</span>';
+    
+    Object.keys(qualityOptions).forEach(quality => {
+        const btn = document.createElement('button');
+        btn.className = `quality-btn ${quality === currentQuality ? 'active' : ''}`;
+        btn.textContent = qualityOptions[quality].label;
+        btn.dataset.quality = quality;
+        btn.addEventListener('click', () => setQuality(quality));
+        qualityContainer.appendChild(btn);
+    });
+    
+    // Inserir após o botão de compartilhar
+    const shareControls = document.querySelector('.main-content > div');
+    if (shareControls) {
+        shareControls.appendChild(qualityContainer);
+    }
+}
+
+function setupServerUI() {
+    addQualityControls();
+}
+
+// ================= TELA CHEIA =================
+function toggleFullscreen(videoContainer) {
+    if (!document.fullscreenElement) {
+        if (videoContainer.requestFullscreen) {
+            videoContainer.requestFullscreen();
+        } else if (videoContainer.webkitRequestFullscreen) {
+            videoContainer.webkitRequestFullscreen();
+        }
+        videoContainer.classList.add('fullscreen-active');
+    } else {
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+        }
+        videoContainer.classList.remove('fullscreen-active');
+    }
+}
+
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) {
+        document.querySelectorAll('.fullscreen-active').forEach(el => {
+            el.classList.remove('fullscreen-active');
+        });
+    }
+});
 
 // ================= EVENTOS =================
 createServerBtn.addEventListener('click', () => openModal('create'));
@@ -131,6 +243,7 @@ socket.on('server-created', (data) => {
     updateInviteLink(data.serverId);
     shareScreenBtn.classList.remove('hidden');
     noContent.classList.add('hidden');
+    setupServerUI();
 });
 
 socket.on('server-info', (data) => {
@@ -140,13 +253,13 @@ socket.on('server-info', (data) => {
     updateInviteLink(data.id);
     shareScreenBtn.classList.remove('hidden');
     noContent.classList.add('hidden');
+    setupServerUI();
 });
 
 socket.on('user-joined', (data) => {
     console.log('👤 Usuário entrou:', data.userId);
     
     if (isSharing && data.userId !== socket.id) {
-        console.log('📡 Criando conexão com novo usuário:', data.userId);
         createPeerConnection(data.userId, true);
     }
 });
@@ -156,7 +269,6 @@ socket.on('existing-users', (users) => {
     
     users.forEach(userId => {
         if (userId !== socket.id) {
-            console.log('🔗 Criando conexão com:', userId);
             createPeerConnection(userId, false);
         }
     });
@@ -190,21 +302,16 @@ socket.on('offer', async (data) => {
             answer: pc.localDescription,
             to: data.from
         });
-        
-        console.log('📤 Resposta enviada para:', data.from);
     } catch (err) {
         console.error('❌ Erro ao processar oferta:', err);
     }
 });
 
 socket.on('answer', async (data) => {
-    console.log('📥 Recebida resposta de:', data.from);
-    
     const pc = peerConnections.get(data.from);
     if (pc) {
         try {
             await pc.setRemoteDescription(data.answer);
-            console.log('✅ Conexão estabelecida com:', data.from);
         } catch (err) {
             console.error('❌ Erro ao processar resposta:', err);
         }
@@ -250,8 +357,6 @@ const configuration = {
 };
 
 function createPeerConnection(userId, isInitiator) {
-    console.log('🔗 Criando peer connection com:', userId, 'Iniciador:', isInitiator);
-    
     if (peerConnections.has(userId)) {
         return peerConnections.get(userId);
     }
@@ -266,11 +371,8 @@ function createPeerConnection(userId, isInitiator) {
     }
     
     pc.ontrack = (event) => {
-        console.log('📺 Recebendo stream de:', userId);
-        
         if (event.streams.length > 0) {
             const stream = event.streams[0];
-            
             if (!hiddenStreams.has(userId)) {
                 addRemoteVideo(userId, stream);
             }
@@ -286,24 +388,16 @@ function createPeerConnection(userId, isInitiator) {
         }
     };
     
-    pc.onconnectionstatechange = () => {
-        console.log('🔄 Estado da conexão com', userId, ':', pc.connectionState);
-    };
-    
     if (isInitiator) {
         pc.createOffer()
-            .then(offer => {
-                return pc.setLocalDescription(offer);
-            })
+            .then(offer => pc.setLocalDescription(offer))
             .then(() => {
                 socket.emit('offer', {
                     offer: pc.localDescription,
                     to: userId
                 });
             })
-            .catch(err => {
-                console.error('❌ Erro ao criar oferta:', err);
-            });
+            .catch(err => console.error('❌ Erro ao criar oferta:', err));
     }
     
     return pc;
@@ -311,9 +405,14 @@ function createPeerConnection(userId, isInitiator) {
 
 async function startScreenShare() {
     try {
+        const quality = qualityOptions[currentQuality];
+        
         localStream = await navigator.mediaDevices.getDisplayMedia({
             video: {
-                cursor: "always"
+                cursor: "always",
+                width: { ideal: quality.width },
+                height: { ideal: quality.height },
+                frameRate: { ideal: quality.fps }
             },
             audio: true
         });
@@ -332,12 +431,8 @@ async function startScreenShare() {
         }
         
         localStream.getTracks().forEach(track => {
-            track.onended = () => {
-                stopScreenShare();
-            };
+            track.onended = () => stopScreenShare();
         });
-        
-        console.log('✅ Compartilhamento iniciado');
     } catch (error) {
         console.error('❌ Erro ao compartilhar tela:', error);
         alert('Erro ao compartilhar tela: ' + error.message);
@@ -358,9 +453,7 @@ function stopScreenShare() {
     
     removeLocalVideo();
     
-    peerConnections.forEach((pc) => {
-        pc.close();
-    });
+    peerConnections.forEach(pc => pc.close());
     peerConnections.clear();
     
     if (currentServerId) {
@@ -376,7 +469,6 @@ function addLocalVideo(stream) {
     videoContainer.id = 'local-video-container';
     
     const video = document.createElement('video');
-    video.id = 'local-video';
     video.autoplay = true;
     video.muted = true;
     video.playsInline = true;
@@ -386,8 +478,19 @@ function addLocalVideo(stream) {
     label.className = 'screen-label';
     label.textContent = '🖥️ Sua tela';
     
+    const controls = document.createElement('div');
+    controls.className = 'video-controls';
+    
+    const fullscreenBtn = document.createElement('button');
+    fullscreenBtn.className = 'control-btn';
+    fullscreenBtn.textContent = '⛶ Tela Cheia';
+    fullscreenBtn.addEventListener('click', () => toggleFullscreen(videoContainer));
+    
+    controls.appendChild(fullscreenBtn);
+    
     videoContainer.appendChild(video);
     videoContainer.appendChild(label);
+    videoContainer.appendChild(controls);
     screensContainer.appendChild(videoContainer);
 }
 
@@ -399,12 +502,8 @@ function removeLocalVideo() {
 }
 
 function addRemoteVideo(userId, stream) {
-    console.log('➕ Adicionando vídeo remoto de:', userId);
-    
     const existingVideo = document.getElementById(`remote-video-${userId}`);
-    if (existingVideo) {
-        return;
-    }
+    if (existingVideo) return;
     
     const videoContainer = document.createElement('div');
     videoContainer.className = 'screen-item';
@@ -419,20 +518,28 @@ function addRemoteVideo(userId, stream) {
     label.className = 'screen-label';
     label.textContent = `🖥️ Tela de ${userId.slice(0, 8)}`;
     
+    const controls = document.createElement('div');
+    controls.className = 'video-controls';
+    
+    const fullscreenBtn = document.createElement('button');
+    fullscreenBtn.className = 'control-btn';
+    fullscreenBtn.textContent = '⛶ Tela Cheia';
+    fullscreenBtn.addEventListener('click', () => toggleFullscreen(videoContainer));
+    
     const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'toggle-screen-btn';
-    toggleBtn.textContent = '🚫 Parar de Ver Tela';
-    toggleBtn.dataset.userId = userId;
-    toggleBtn.dataset.visible = 'true';
+    toggleBtn.className = 'control-btn stop-view';
+    toggleBtn.textContent = '🚫 Parar de Ver';
     toggleBtn.addEventListener('click', () => toggleScreen(userId));
+    
+    controls.appendChild(fullscreenBtn);
+    controls.appendChild(toggleBtn);
     
     videoContainer.appendChild(video);
     videoContainer.appendChild(label);
-    videoContainer.appendChild(toggleBtn);
+    videoContainer.appendChild(controls);
     screensContainer.appendChild(videoContainer);
     
     remoteStreams.set(userId, { stream, videoContainer, video });
-    console.log('✅ Vídeo remoto adicionado');
 }
 
 function toggleScreen(userId) {
@@ -440,22 +547,17 @@ function toggleScreen(userId) {
     if (!streamData) return;
     
     const { videoContainer, video } = streamData;
-    const toggleBtn = videoContainer.querySelector('.toggle-screen-btn');
-    const isVisible = toggleBtn.dataset.visible === 'true';
+    const toggleBtn = videoContainer.querySelector('.stop-view');
     
-    if (isVisible) {
-        // Parar de ver
+    if (!hiddenStreams.has(userId)) {
         hiddenStreams.add(userId);
         videoContainer.style.display = 'none';
         addToHiddenList(userId);
-        console.log('🚫 Parou de ver tela de:', userId);
     } else {
-        // Voltar a ver
         hiddenStreams.delete(userId);
         videoContainer.style.display = 'block';
         video.srcObject = streamData.stream;
         removeFromHiddenList(userId);
-        console.log('👁️ Voltou a ver tela de:', userId);
     }
 }
 
@@ -474,9 +576,7 @@ function addToHiddenList(userId) {
 
 function removeFromHiddenList(userId) {
     const hiddenItem = document.getElementById(`hidden-item-${userId}`);
-    if (hiddenItem) {
-        hiddenItem.remove();
-    }
+    if (hiddenItem) hiddenItem.remove();
     
     if (hiddenScreensList.children.length === 0) {
         hiddenScreensBox.classList.add('hidden');
@@ -487,26 +587,17 @@ function showHiddenScreen(userId) {
     const streamData = remoteStreams.get(userId);
     if (!streamData) return;
     
-    const { videoContainer, video } = streamData;
-    const toggleBtn = videoContainer.querySelector('.toggle-screen-btn');
-    
     hiddenStreams.delete(userId);
-    videoContainer.style.display = 'block';
-    video.srcObject = streamData.stream;
-    toggleBtn.textContent = '🚫 Parar de Ver Tela';
-    toggleBtn.dataset.visible = 'true';
-    
+    streamData.videoContainer.style.display = 'block';
+    streamData.video.srcObject = streamData.stream;
     removeFromHiddenList(userId);
-    console.log('👁️ Voltou a ver tela de:', userId);
 }
 
 window.showHiddenScreen = showHiddenScreen;
 
 function removeRemoteVideo(userId) {
     const videoContainer = document.getElementById(`remote-video-${userId}`);
-    if (videoContainer) {
-        videoContainer.remove();
-    }
+    if (videoContainer) videoContainer.remove();
     remoteStreams.delete(userId);
     hiddenStreams.delete(userId);
     removeFromHiddenList(userId);
@@ -521,7 +612,6 @@ window.addEventListener('load', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const serverId = urlParams.get('server');
     if (serverId) {
-        console.log('🔗 Entrando via link:', serverId);
         socket.emit('join-server', serverId);
     }
 });
