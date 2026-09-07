@@ -31,6 +31,7 @@ let isSharing = false;
 let modalOpen = false;
 const peerConnections = new Map();
 const remoteStreams = new Map();
+const hiddenStreams = new Set(); // Streams que o usuário escolheu não ver
 
 // ================= MODAL =================
 function openModal(mode) {
@@ -154,9 +155,7 @@ socket.on('channel-created', (channel) => {
 // ============ WEBRTC EVENTS ============
 socket.on('user-joined', (data) => {
     console.log('👤 Usuário entrou:', data.userId);
-    console.log('👥 Lista de usuários:', data.userList);
     
-    // Se EU estou compartilhando, criar conexão com o novo usuário
     if (isSharing && data.userId !== socket.id) {
         console.log('📡 Criando conexão com novo usuário:', data.userId);
         createPeerConnection(data.userId, true);
@@ -166,7 +165,6 @@ socket.on('user-joined', (data) => {
 socket.on('existing-users', (users) => {
     console.log('👥 Usuários existentes:', users);
     
-    // Criar conexões com usuários existentes
     users.forEach(userId => {
         if (userId !== socket.id) {
             console.log('🔗 Criando conexão com:', userId);
@@ -187,6 +185,7 @@ socket.on('stream-stopped', (data) => {
         peerConnections.get(data.userId).close();
         peerConnections.delete(data.userId);
     }
+    hiddenStreams.delete(data.userId);
 });
 
 socket.on('offer', async (data) => {
@@ -243,6 +242,7 @@ socket.on('user-left', (userId) => {
         peerConnections.get(userId).close();
         peerConnections.delete(userId);
     }
+    hiddenStreams.delete(userId);
 });
 
 socket.on('error', (error) => {
@@ -307,7 +307,6 @@ const configuration = {
 function createPeerConnection(userId, isInitiator) {
     console.log('🔗 Criando peer connection com:', userId, 'Iniciador:', isInitiator);
     
-    // Se já existe, retornar
     if (peerConnections.has(userId)) {
         return peerConnections.get(userId);
     }
@@ -326,10 +325,16 @@ function createPeerConnection(userId, isInitiator) {
     // Receber stream remoto
     pc.ontrack = (event) => {
         console.log('📺 Recebendo stream de:', userId);
-        console.log('🎥 Streams:', event.streams.length);
         
         if (event.streams.length > 0) {
-            addRemoteVideo(userId, event.streams[0]);
+            const stream = event.streams[0];
+            
+            // Se o stream não está na lista de ocultos, mostrar
+            if (!hiddenStreams.has(userId)) {
+                addRemoteVideo(userId, stream);
+            } else {
+                console.log('👁️ Stream oculto, não mostrando:', userId);
+            }
         }
     };
     
@@ -346,12 +351,6 @@ function createPeerConnection(userId, isInitiator) {
     // Estado da conexão
     pc.onconnectionstatechange = () => {
         console.log('🔄 Estado da conexão com', userId, ':', pc.connectionState);
-        
-        if (pc.connectionState === 'connected') {
-            console.log('✅ Conectado com sucesso a:', userId);
-        } else if (pc.connectionState === 'failed') {
-            console.error('❌ Falha na conexão com:', userId);
-        }
     };
     
     // Se for iniciador, criar oferta
@@ -393,13 +392,9 @@ async function startScreenShare() {
         
         addLocalVideo(localStream);
         
-        // Notificar servidor
         if (currentChannelId) {
             socket.emit('start-stream', { channelId: currentChannelId });
         }
-        
-        // Criar conexões com todos os usuários no canal
-        // (será feito quando receber 'user-joined' ou 'existing-users')
         
         localStream.getTracks().forEach(track => {
             track.onended = () => {
@@ -470,7 +465,12 @@ function removeLocalVideo() {
 
 function addRemoteVideo(userId, stream) {
     console.log('➕ Adicionando vídeo remoto de:', userId);
-    removeRemoteVideo(userId);
+    
+    // Verificar se já existe
+    const existingVideo = document.getElementById(`remote-video-${userId}`);
+    if (existingVideo) {
+        return;
+    }
     
     const videoContainer = document.createElement('div');
     videoContainer.className = 'screen-item';
@@ -485,11 +485,19 @@ function addRemoteVideo(userId, stream) {
     label.className = 'screen-label';
     label.textContent = `🖥️ Tela de ${userId.slice(0, 8)}`;
     
+    // Botão para ocultar/mostrar
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'toggle-screen-btn';
+    toggleBtn.textContent = '👁️ Ocultar';
+    toggleBtn.dataset.userId = userId;
+    toggleBtn.addEventListener('click', () => toggleScreen(userId));
+    
     videoContainer.appendChild(video);
     videoContainer.appendChild(label);
+    videoContainer.appendChild(toggleBtn);
     screensContainer.appendChild(videoContainer);
     
-    remoteStreams.set(userId, stream);
+    remoteStreams.set(userId, { stream, videoContainer, video });
     console.log('✅ Vídeo remoto adicionado');
 }
 
@@ -499,6 +507,34 @@ function removeRemoteVideo(userId) {
         videoContainer.remove();
     }
     remoteStreams.delete(userId);
+}
+
+// ================= FUNÇÃO PARA ALTERNAR VISUALIZAÇÃO =================
+function toggleScreen(userId) {
+    const videoContainer = document.getElementById(`remote-video-${userId}`);
+    if (!videoContainer) return;
+    
+    const video = videoContainer.querySelector('video');
+    const toggleBtn = videoContainer.querySelector('.toggle-screen-btn');
+    
+    if (hiddenStreams.has(userId)) {
+        // Mostrar novamente
+        hiddenStreams.delete(userId);
+        const streamData = remoteStreams.get(userId);
+        if (streamData) {
+            video.srcObject = streamData.stream;
+            videoContainer.style.display = 'block';
+            toggleBtn.textContent = '👁️ Ocultar';
+            console.log('👁️ Mostrando tela de:', userId);
+        }
+    } else {
+        // Ocultar
+        hiddenStreams.add(userId);
+        video.srcObject = null;
+        videoContainer.style.display = 'none';
+        toggleBtn.textContent = '👁️ Mostrar';
+        console.log('🙈 Ocultando tela de:', userId);
+    }
 }
 
 // ================= EVENT LISTENERS =================
@@ -523,4 +559,4 @@ window.addEventListener('beforeunload', () => {
 });
 
 console.log('🚀 App carregado com sucesso!');
-console.log('📝 Logs detalhados ativados para debug');
+console.log('📝 Sistema de visualização seletiva ativado');
