@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ScreenShare - Compartilhamento de Tela</title>
+    <title>SóTela - Compartilhamento de Tela</title>
     <style>
         * {
             margin: 0;
@@ -324,9 +324,9 @@
 </head>
 <body>
     <div class="header">
-        <h1>🖥️ ScreenShare</h1>
+        <h1>📺 SóTela</h1>
         <div class="header-buttons">
-            <button class="button" id="createServerBtn">📺 Criar Sala de Transmissão</button>
+            <button class="button" id="createServerBtn">📺 Criar Sala</button>
             <button class="button" id="joinServerBtn">🚪 Entrar em Sala</button>
         </div>
     </div>
@@ -334,7 +334,7 @@
     <div class="container">
         <div class="sidebar hidden" id="sidebar">
             <div class="invite-box">
-                <h3>📨 Convite</h3>
+                <h3>📨 Convite da Sala</h3>
                 <p style="font-size: 0.9rem; margin-top: 5px;">Compartilhe este link:</p>
                 <div class="invite-link">
                     <input type="text" id="inviteLinkInput" readonly>
@@ -364,8 +364,8 @@
                 <button class="button stop hidden" id="stopShareBtn">⏹️ Parar Compartilhamento</button>
             </div>
             <div id="noContent" style="text-align: center; color: #666; margin-top: 50px;">
-                <h2>Bem-vindo ao ScreenShare</h2>
-                <p>Crie ou entre em uma sala de transmissão para começar</p>
+                <h2>Bem-vindo ao SóTela</h2>
+                <p>Crie ou entre em uma sala para compartilhar telas</p>
             </div>
         </div>
     </div>
@@ -374,9 +374,9 @@
 
     <div class="modal" id="serverModal">
         <div class="modal-content">
-            <h2 id="modalTitle">Criar Servidor</h2>
-            <input type="text" class="input" id="serverNameInput" placeholder="Nome do servidor">
-            <input type="text" class="input hidden" id="serverIdInput" placeholder="ID do servidor">
+            <h2 id="modalTitle">Criar Sala no SóTela</h2>
+            <input type="text" class="input" id="serverNameInput" placeholder="Nome da sala">
+            <input type="text" class="input hidden" id="serverIdInput" placeholder="ID da sala">
             <div style="display: flex; gap: 10px; margin-top: 20px;">
                 <button class="button" id="confirmServerBtn">Confirmar</button>
                 <button class="button stop" id="cancelServerBtn">Cancelar</button>
