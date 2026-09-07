@@ -31,7 +31,7 @@ let isSharing = false;
 let modalOpen = false;
 const peerConnections = new Map();
 const remoteStreams = new Map();
-const hiddenStreams = new Set(); // Streams que o usuário escolheu não ver
+const hiddenStreams = new Set();
 
 // ================= MODAL =================
 function openModal(mode) {
@@ -175,7 +175,6 @@ socket.on('existing-users', (users) => {
 
 socket.on('stream-started', (data) => {
     console.log('📡 Stream iniciado por:', data.userId);
-    // O streamer vai criar a conexão
 });
 
 socket.on('stream-stopped', (data) => {
@@ -366,6 +365,95 @@ function createPeerConnection(userId, isInitiator) {
     return pc;
 }
 
+async function startScreenShare() {
+    try {
+        localStream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+                cursor: "always"
+            },
+            audio: true
+        });
+        
+        isSharing = true;
+        shareScreenBtn.classList.add('hidden');
+        stopShareBtn.classList.remove('hidden');
+        statusIndicator.textContent = '🟢 AO VIVO';
+        statusIndicator.classList.remove('hidden');
+        statusIndicator.classList.add('live');
+        
+        addLocalVideo(localStream);
+        
+        if (currentChannelId) {
+            socket.emit('start-stream', { channelId: currentChannelId });
+        }
+        
+        localStream.getTracks().forEach(track => {
+            track.onended = () => {
+                stopScreenShare();
+            };
+        });
+        
+        console.log('✅ Compartilhamento iniciado');
+    } catch (error) {
+        console.error('❌ Erro ao compartilhar tela:', error);
+        alert('Erro ao compartilhar tela: ' + error.message);
+    }
+}
+
+function stopScreenShare() {
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+    }
+    
+    isSharing = false;
+    shareScreenBtn.classList.remove('hidden');
+    stopShareBtn.classList.add('hidden');
+    statusIndicator.textContent = '🔴 NÃO ESTÁ TRANSMITINDO';
+    statusIndicator.classList.remove('live');
+    
+    removeLocalVideo();
+    
+    peerConnections.forEach((pc) => {
+        pc.close();
+    });
+    peerConnections.clear();
+    
+    if (currentChannelId) {
+        socket.emit('stop-stream', { channelId: currentChannelId });
+    }
+}
+
+function addLocalVideo(stream) {
+    removeLocalVideo();
+    
+    const videoContainer = document.createElement('div');
+    videoContainer.className = 'screen-item';
+    videoContainer.id = 'local-video-container';
+    
+    const video = document.createElement('video');
+    video.id = 'local-video';
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    
+    const label = document.createElement('div');
+    label.className = 'screen-label';
+    label.textContent = '🖥️ Sua tela';
+    
+    videoContainer.appendChild(video);
+    videoContainer.appendChild(label);
+    screensContainer.appendChild(videoContainer);
+}
+
+function removeLocalVideo() {
+    const localVideoContainer = document.getElementById('local-video-container');
+    if (localVideoContainer) {
+        localVideoContainer.remove();
+    }
+}
+
 function addRemoteVideo(userId, stream) {
     console.log('➕ Adicionando vídeo remoto de:', userId);
     
@@ -442,39 +530,6 @@ function removeRemoteVideo(userId) {
     }
     remoteStreams.delete(userId);
     hiddenStreams.delete(userId);
-}
-
-// ================= FUNÇÃO PARA ALTERNAR VISUALIZAÇÃO =================
-function toggleScreen(userId) {
-    const videoContainer = document.getElementById(`remote-video-${userId}`);
-    if (!videoContainer) return;
-    
-    const video = videoContainer.querySelector('video');
-    const toggleBtn = videoContainer.querySelector('.toggle-screen-btn');
-    const isVisible = toggleBtn.dataset.visible === 'true';
-    
-    if (isVisible) {
-        // Parar de ver
-        hiddenStreams.add(userId);
-        video.srcObject = null;
-        videoContainer.style.display = 'none';
-        toggleBtn.textContent = '👁️ Ver Tela';
-        toggleBtn.dataset.visible = 'false';
-        toggleBtn.style.background = 'rgba(76, 175, 80, 0.8)';
-        console.log('🚫 Parou de ver tela de:', userId);
-    } else {
-        // Voltar a ver
-        hiddenStreams.delete(userId);
-        const streamData = remoteStreams.get(userId);
-        if (streamData) {
-            video.srcObject = streamData.stream;
-            videoContainer.style.display = 'block';
-            toggleBtn.textContent = '🚫 Parar de Ver Tela';
-            toggleBtn.dataset.visible = 'true';
-            toggleBtn.style.background = 'rgba(244, 67, 54, 0.8)';
-            console.log('👁️ Voltou a ver tela de:', userId);
-        }
-    }
 }
 
 // ================= EVENT LISTENERS =================
