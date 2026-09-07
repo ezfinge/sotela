@@ -21,8 +21,8 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-const servers = new Map();
-const channels = new Map();
+// Armazenamento
+const servers = new Map(); // serverId -> { id, name, users: Set() }
 
 function generateId() {
     return crypto.randomBytes(4).toString('hex');
@@ -34,23 +34,16 @@ io.on('connection', (socket) => {
     // CRIAR SERVIDOR
     socket.on('create-server', (serverName) => {
         const serverId = generateId();
-        const channelId = generateId();
-        
-        const defaultChannel = {
-            id: channelId,
-            name: 'geral',
-            serverId: serverId,
-            users: new Set()
-        };
         
         const newServer = {
             id: serverId,
             name: serverName || 'Servidor',
-            channels: new Map([[channelId, defaultChannel]])
+            users: new Set([socket.id])
         };
         
         servers.set(serverId, newServer);
-        channels.set(channelId, defaultChannel);
+        socket.join(serverId);
+        socket.data.serverId = serverId;
         
         socket.emit('server-created', { 
             serverId: serverId, 
@@ -66,100 +59,36 @@ io.on('connection', (socket) => {
         
         if (server) {
             socket.join(serverId);
+            server.users.add(socket.id);
             socket.data.serverId = serverId;
             
+            // Enviar informações do servidor
             socket.emit('server-info', {
                 id: server.id,
-                name: server.name,
-                channels: Array.from(server.channels.values()).map(c => ({ 
-                    id: c.id, 
-                    name: c.name 
-                }))
+                name: server.name
             });
+            
+            // Notificar outros usuários
+            socket.to(serverId).emit('user-joined', { 
+                userId: socket.id,
+                userList: Array.from(server.users)
+            });
+            
+            // Enviar lista de usuários existentes para o novo usuário
+            const existingUsers = Array.from(server.users).filter(id => id !== socket.id);
+            if (existingUsers.length > 0) {
+                socket.emit('existing-users', existingUsers);
+            }
+            
+            console.log('✅ Cliente entrou no servidor:', serverId);
+            console.log('👥 Usuários no servidor:', server.users.size);
         } else {
             socket.emit('error', 'Servidor não encontrado');
         }
     });
 
-    // CRIAR CANAL
-    socket.on('create-channel', (data) => {
-        const { serverId, channelName } = data;
-        const server = servers.get(serverId);
-        
-        if (server) {
-            const channelId = generateId();
-            const newChannel = {
-                id: channelId,
-                name: channelName || 'novo-canal',
-                serverId: serverId,
-                users: new Set()
-            };
-            
-            server.channels.set(channelId, newChannel);
-            channels.set(channelId, newChannel);
-            
-            io.to(serverId).emit('channel-created', { 
-                id: channelId, 
-                name: newChannel.name 
-            });
-        }
-    });
-
-    // ENTRAR EM CANAL
-    socket.on('join-channel', (data) => {
-        const { channelId } = data;
-        const channel = channels.get(channelId);
-        
-        if (channel) {
-            socket.join(channelId);
-            channel.users.add(socket.id);
-            socket.data.channelId = channelId;
-            
-            // Enviar lista de usuários no canal
-            const userList = Array.from(channel.users);
-            
-            // Notificar TODOS no canal sobre o novo usuário
-            io.to(channelId).emit('user-joined', { 
-                userId: socket.id,
-                userList: userList
-            });
-            
-            // Se há outros usuários, informar ao novo usuário
-            const existingUsers = userList.filter(id => id !== socket.id);
-            if (existingUsers.length > 0) {
-                socket.emit('existing-users', existingUsers);
-            }
-            
-            console.log('✅ Usuário', socket.id, 'entrou no canal', channelId);
-            console.log('👥 Usuários no canal:', userList.length);
-        }
-    });
-
-    // SAIR DO CANAL
-    socket.on('leave-channel', (channelId) => {
-        const channel = channels.get(channelId);
-        if (channel) {
-            channel.users.delete(socket.id);
-            socket.leave(channelId);
-            io.to(channelId).emit('user-left', socket.id);
-        }
-    });
-
-    // ============ WEBRTC SINALIZAÇÃO ============
-    
-    // Quando alguém começa a compartilhar
-    socket.on('start-stream', (data) => {
-        console.log('📡 Usuário', socket.id, 'começou a transmitir no canal', data.channelId);
-        
-        // Notificar todos no canal EXCETO o transmissor
-        socket.to(data.channelId).emit('stream-started', { 
-            userId: socket.id 
-        });
-    });
-
-    // Oferta WebRTC
+    // WEBRTC SINALIZAÇÃO
     socket.on('offer', (data) => {
-        console.log('📤 Oferta de', socket.id, 'para', data.to);
         if (data.to) {
             socket.to(data.to).emit('offer', {
                 offer: data.offer,
@@ -168,9 +97,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Resposta WebRTC
     socket.on('answer', (data) => {
-        console.log('📥 Resposta de', socket.id, 'para', data.to);
         if (data.to) {
             socket.to(data.to).emit('answer', {
                 answer: data.answer,
@@ -179,7 +106,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ICE Candidate
     socket.on('ice-candidate', (data) => {
         if (data.to) {
             socket.to(data.to).emit('ice-candidate', {
@@ -189,24 +115,42 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Parar transmissão
+    socket.on('start-stream', (data) => {
+        const serverId = socket.data.serverId;
+        if (serverId) {
+            socket.to(serverId).emit('stream-started', { 
+                userId: socket.id 
+            });
+        }
+    });
+
     socket.on('stop-stream', (data) => {
-        console.log('🛑 Usuário', socket.id, 'parou de transmitir');
-        socket.to(data.channelId).emit('stream-stopped', { 
-            userId: socket.id 
-        });
+        const serverId = socket.data.serverId;
+        if (serverId) {
+            socket.to(serverId).emit('stream-stopped', { 
+                userId: socket.id 
+            });
+        }
     });
 
     // DESCONECTAR
     socket.on('disconnect', () => {
         console.log('❌ Cliente desconectado:', socket.id);
         
-        channels.forEach((channel, channelId) => {
-            if (channel.users.has(socket.id)) {
-                channel.users.delete(socket.id);
-                io.to(channelId).emit('user-left', socket.id);
+        const serverId = socket.data.serverId;
+        if (serverId) {
+            const server = servers.get(serverId);
+            if (server) {
+                server.users.delete(socket.id);
+                socket.to(serverId).emit('user-left', socket.id);
+                
+                // Remover servidor se vazio
+                if (server.users.size === 0) {
+                    servers.delete(serverId);
+                    console.log('🗑️ Servidor removido:', serverId);
+                }
             }
-        });
+        }
     });
 });
 
