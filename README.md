@@ -16,10 +16,10 @@ Serviço de compartilhamento de tela com áudio, estilo Discord, sem necessidade
 
 \`\`\`bash
 # Clone o repositório
-git clone https://github.com/SEU_USUARIO/screenshare.git
+git clone https://github.com/ezfinge/sotela.git
 
 # Entre na pasta
-cd screenshare
+cd sotela
 
 # Instale as dependências
 npm install
