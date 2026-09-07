@@ -174,7 +174,7 @@
         }
 
         .modal {
-            display: none;
+            display: none; /* Muda de flex para none */
             position: fixed;
             top: 0;
             left: 0;
@@ -188,6 +188,10 @@
 
         .modal.active {
             display: flex;
+        }
+
+        .modal.hidden {
+            display: none !important; /* Força esconder */
         }
 
         .modal-content {
