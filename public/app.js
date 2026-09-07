@@ -47,18 +47,20 @@ function openModal(mode) {
     serverModal.style.display = 'flex';
     
     if (mode === 'create') {
-        modalTitle.textContent = 'Criar Servidor';
+        modalTitle.textContent = 'Criar Sala de Transmissão';
         serverNameInput.classList.remove('hidden');
         serverNameInput.style.display = 'block';
+        serverNameInput.placeholder = 'Nome da sala';
         serverIdInput.classList.add('hidden');
         serverIdInput.style.display = 'none';
         serverNameInput.focus();
     } else {
-        modalTitle.textContent = 'Entrar em Servidor';
+        modalTitle.textContent = 'Entrar em Sala';
         serverNameInput.classList.add('hidden');
         serverNameInput.style.display = 'none';
         serverIdInput.classList.remove('hidden');
         serverIdInput.style.display = 'block';
+        serverIdInput.placeholder = 'ID da sala';
         serverIdInput.focus();
     }
 }
@@ -71,22 +73,19 @@ function closeModal() {
 }
 
 function updateInviteLink(serverId) {
-    console.log('🔗 Gerando link de convite para servidor:', serverId);
+    console.log('🔗 Gerando link de convite para sala:', serverId);
     
     const baseUrl = window.location.origin;
     const inviteUrl = `${baseUrl}/?server=${serverId}`;
     
     console.log('📋 Link gerado:', inviteUrl);
     
-    // Atualizar o input
     inviteLinkInput.value = inviteUrl;
     inviteId.textContent = serverId;
     
-    // Tornar o input visível
-    inviteLinkInput.style.display = 'block';
-    
-    // Selecionar automaticamente para facilitar cópia
-    inviteLinkInput.select();
+    setTimeout(() => {
+        inviteLinkInput.select();
+    }, 100);
 }
 
 // ================= QUALIDADE =================
@@ -155,8 +154,8 @@ joinServerBtn.addEventListener('click', () => openModal('join'));
 cancelServerBtn.addEventListener('click', closeModal);
 
 confirmServerBtn.addEventListener('click', () => {
-    if (modalTitle.textContent === 'Criar Servidor') {
-        const name = serverNameInput.value.trim() || 'Meu Servidor';
+    if (modalTitle.textContent === 'Criar Sala de Transmissão') {
+        const name = serverNameInput.value.trim() || 'Minha Sala';
         closeModal();
         socket.emit('create-server', name);
     } else {
@@ -165,7 +164,7 @@ confirmServerBtn.addEventListener('click', () => {
             closeModal();
             socket.emit('join-server', serverId);
         } else {
-            alert('Digite o ID do servidor');
+            alert('Digite o ID da sala');
         }
     }
 });
@@ -188,13 +187,23 @@ serverIdInput.addEventListener('keypress', (e) => {
 
 copyInviteBtn.addEventListener('click', () => {
     inviteLinkInput.select();
+    inviteLinkInput.setSelectionRange(0, 99999);
     document.execCommand('copy');
     alert('✅ Link copiado!');
 });
 
 copyIdBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(currentServerId);
-    alert('✅ ID copiado!');
+    navigator.clipboard.writeText(currentServerId).then(() => {
+        alert('✅ ID copiado!');
+    }).catch(() => {
+        const textarea = document.createElement('textarea');
+        textarea.value = currentServerId;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+        alert('✅ ID copiado!');
+    });
 });
 
 // ================= SOCKET EVENTS =================
@@ -203,44 +212,34 @@ socket.on('connect', () => {
 });
 
 socket.on('server-created', (data) => {
-    console.log('🎉 Servidor criado:', data);
+    console.log('🎉 Sala criada:', data);
     currentServerId = data.serverId;
     sidebar.classList.remove('hidden');
     serverName.textContent = data.serverName;
-    
-    // Gerar link de convite
     updateInviteLink(data.serverId);
-    
     shareScreenBtn.classList.remove('hidden');
     noContent.classList.add('hidden');
     setupServerUI();
     
-    // Mostrar alerta com o link
     const inviteUrl = `${window.location.origin}/?server=${data.serverId}`;
-    alert(`✅ Servidor criado!\n\n🔗 Link de convite:\n${inviteUrl}\n\nCompartilhe este link com seus amigos!`);
+    alert(`✅ Sala criada!\n\n🔗 Link de convite:\n${inviteUrl}\n\nCompartilhe este link!`);
 });
 
 socket.on('server-info', (data) => {
-    console.log('📋 Informações do servidor:', data);
+    console.log('📋 Informações da sala:', data);
     currentServerId = data.id;
     sidebar.classList.remove('hidden');
     serverName.textContent = data.name;
-    
-    // Gerar link de convite
     updateInviteLink(data.id);
-    
     shareScreenBtn.classList.remove('hidden');
     noContent.classList.add('hidden');
     setupServerUI();
 });
 
-// ============ EVENTOS DE STREAM ============
 socket.on('user-joined', (data) => {
     console.log('👤 Usuário entrou:', data.userId);
     
-    // Se EU estou transmitindo, criar conexão com o novo usuário
     if (isSharing && data.userId !== socket.id) {
-        console.log('📡 Criando conexão com novo usuário:', data.userId);
         createPeerConnection(data.userId, true);
     }
 });
@@ -248,10 +247,8 @@ socket.on('user-joined', (data) => {
 socket.on('existing-streamers', (streamers) => {
     console.log('📡 Transmissores existentes:', streamers);
     
-    // Criar conexões com quem já está transmitindo
     streamers.forEach(userId => {
         if (userId !== socket.id) {
-            console.log('🔗 Criando conexão com transmissor:', userId);
             createPeerConnection(userId, false);
         }
     });
@@ -260,9 +257,7 @@ socket.on('existing-streamers', (streamers) => {
 socket.on('stream-started', (data) => {
     console.log('📡 Transmissão iniciada por:', data.userId);
     
-    // Alguém começou a transmitir, criar conexão
     if (data.userId !== socket.id) {
-        console.log('🔗 Criando conexão para receber transmissão de:', data.userId);
         createPeerConnection(data.userId, false);
     }
 });
@@ -359,15 +354,12 @@ function createPeerConnection(userId, isInitiator) {
     const pc = new RTCPeerConnection(configuration);
     peerConnections.set(userId, pc);
     
-    // Adicionar tracks locais se estiver compartilhando
     if (localStream) {
         localStream.getTracks().forEach(track => {
             pc.addTrack(track, localStream);
-            console.log('➕ Track adicionada:', track.kind);
         });
     }
     
-    // Receber stream remoto
     pc.ontrack = (event) => {
         console.log('📺 Recebendo stream de:', userId);
         
@@ -392,7 +384,6 @@ function createPeerConnection(userId, isInitiator) {
         console.log('🔄 Estado da conexão com', userId, ':', pc.connectionState);
     };
     
-    // Se for iniciador (quem está transmitindo), criar oferta
     if (isInitiator) {
         pc.createOffer()
             .then(offer => pc.setLocalDescription(offer))
@@ -432,10 +423,9 @@ async function startScreenShare() {
         
         addLocalVideo(localStream);
         
-        // Notificar servidor
         if (currentServerId) {
             socket.emit('start-stream');
-            console.log('📡 Transmissão iniciada, notificando servidor');
+            console.log('📡 Transmissão iniciada');
         }
         
         localStream.getTracks().forEach(track => {
@@ -618,6 +608,7 @@ window.addEventListener('load', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const serverId = urlParams.get('server');
     if (serverId) {
+        console.log('🔗 Entrando via link:', serverId);
         socket.emit('join-server', serverId);
     }
 });
