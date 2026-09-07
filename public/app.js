@@ -485,11 +485,12 @@ function addRemoteVideo(userId, stream) {
     label.className = 'screen-label';
     label.textContent = `🖥️ Tela de ${userId.slice(0, 8)}`;
     
-    // Botão para ocultar/mostrar
+    // Botão para parar de ver
     const toggleBtn = document.createElement('button');
     toggleBtn.className = 'toggle-screen-btn';
-    toggleBtn.textContent = '👁️ Ocultar';
+    toggleBtn.textContent = '🚫 Parar de Ver Tela';
     toggleBtn.dataset.userId = userId;
+    toggleBtn.dataset.visible = 'true';
     toggleBtn.addEventListener('click', () => toggleScreen(userId));
     
     videoContainer.appendChild(video);
@@ -516,24 +517,29 @@ function toggleScreen(userId) {
     
     const video = videoContainer.querySelector('video');
     const toggleBtn = videoContainer.querySelector('.toggle-screen-btn');
+    const isVisible = toggleBtn.dataset.visible === 'true';
     
-    if (hiddenStreams.has(userId)) {
-        // Mostrar novamente
+    if (isVisible) {
+        // Parar de ver
+        hiddenStreams.add(userId);
+        video.srcObject = null;
+        videoContainer.style.display = 'none';
+        toggleBtn.textContent = '👁️ Ver Tela';
+        toggleBtn.dataset.visible = 'false';
+        toggleBtn.style.background = 'rgba(76, 175, 80, 0.8)';
+        console.log('🚫 Parou de ver tela de:', userId);
+    } else {
+        // Voltar a ver
         hiddenStreams.delete(userId);
         const streamData = remoteStreams.get(userId);
         if (streamData) {
             video.srcObject = streamData.stream;
             videoContainer.style.display = 'block';
-            toggleBtn.textContent = '👁️ Ocultar';
-            console.log('👁️ Mostrando tela de:', userId);
+            toggleBtn.textContent = '🚫 Parar de Ver Tela';
+            toggleBtn.dataset.visible = 'true';
+            toggleBtn.style.background = 'rgba(244, 67, 54, 0.8)';
+            console.log('👁️ Voltou a ver tela de:', userId);
         }
-    } else {
-        // Ocultar
-        hiddenStreams.add(userId);
-        video.srcObject = null;
-        videoContainer.style.display = 'none';
-        toggleBtn.textContent = '👁️ Mostrar';
-        console.log('🙈 Ocultando tela de:', userId);
     }
 }
 
