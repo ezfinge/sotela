@@ -492,37 +492,61 @@ function addRemoteVideo(userId, stream) {
 }
 
 function toggleScreen(userId) {
-    const videoContainer = document.getElementById(`remote-video-${userId}`);
-    if (!videoContainer) return;
+    const streamData = remoteStreams.get(userId);
+    if (!streamData) return;
     
-    const video = videoContainer.querySelector('video');
+    const { videoContainer, video } = streamData;
     const toggleBtn = videoContainer.querySelector('.toggle-screen-btn');
     const isVisible = toggleBtn.dataset.visible === 'true';
     
     if (isVisible) {
-        // Parar de ver
+        // Parar de ver - NÃO remover, apenas esconder o vídeo
         hiddenStreams.add(userId);
         video.srcObject = null;
-        videoContainer.style.display = 'none';
+        video.style.display = 'none';
         toggleBtn.textContent = '👁️ Ver Tela';
         toggleBtn.dataset.visible = 'false';
         toggleBtn.style.background = 'rgba(76, 175, 80, 0.8)';
+        toggleBtn.style.position = 'absolute';
+        toggleBtn.style.top = '50%';
+        toggleBtn.style.left = '50%';
+        toggleBtn.style.transform = 'translate(-50%, -50%)';
+        toggleBtn.style.bottom = 'auto';
+        toggleBtn.style.right = 'auto';
+        toggleBtn.style.fontSize = '1.2rem';
+        toggleBtn.style.padding = '15px 25px';
+        
+        // Manter o container visível com fundo escuro
+        videoContainer.style.background = '#2a2a2a';
+        videoContainer.style.display = 'flex';
+        videoContainer.style.alignItems = 'center';
+        videoContainer.style.justifyContent = 'center';
+        
         console.log('🚫 Parou de ver tela de:', userId);
     } else {
         // Voltar a ver
         hiddenStreams.delete(userId);
-        const streamData = remoteStreams.get(userId);
-        if (streamData) {
-            video.srcObject = streamData.stream;
-            videoContainer.style.display = 'block';
-            toggleBtn.textContent = '🚫 Parar de Ver Tela';
-            toggleBtn.dataset.visible = 'true';
-            toggleBtn.style.background = 'rgba(244, 67, 54, 0.8)';
-            console.log('👁️ Voltou a ver tela de:', userId);
-        }
+        video.srcObject = streamData.stream;
+        video.style.display = 'block';
+        toggleBtn.textContent = '🚫 Parar de Ver Tela';
+        toggleBtn.dataset.visible = 'true';
+        toggleBtn.style.background = 'rgba(244, 67, 54, 0.8)';
+        toggleBtn.style.position = 'absolute';
+        toggleBtn.style.top = 'auto';
+        toggleBtn.style.left = 'auto';
+        toggleBtn.style.transform = 'none';
+        toggleBtn.style.bottom = '10px';
+        toggleBtn.style.right = '10px';
+        toggleBtn.style.fontSize = '0.9rem';
+        toggleBtn.style.padding = '8px 12px';
+        
+        // Restaurar container
+        videoContainer.style.background = '#000';
+        videoContainer.style.display = 'block';
+        
+        console.log('👁️ Voltou a ver tela de:', userId);
     }
 }
-
 function removeRemoteVideo(userId) {
     const videoContainer = document.getElementById(`remote-video-${userId}`);
     if (videoContainer) {
