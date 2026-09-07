@@ -1,4 +1,3 @@
-// Conexão Socket.IO
 const socket = io();
 
 // Elementos DOM
@@ -31,10 +30,10 @@ let localStream = null;
 let isSharing = false;
 let modalOpen = false;
 const peerConnections = new Map();
+const remoteStreams = new Map();
 
-// ================= FUNÇÕES DO MODAL =================
+// ================= MODAL =================
 function openModal(mode) {
-    console.log('Abrindo modal:', mode);
     modalOpen = true;
     serverModal.classList.remove('hidden');
     serverModal.classList.add('active');
@@ -58,14 +57,12 @@ function openModal(mode) {
 }
 
 function closeModal() {
-    console.log('Fechando modal');
     modalOpen = false;
     serverModal.classList.add('hidden');
     serverModal.classList.remove('active');
     serverModal.style.display = 'none';
 }
 
-// ================= FUNÇÃO DE CONVITE =================
 function updateInviteLink(serverId) {
     const baseUrl = window.location.origin;
     const inviteUrl = `${baseUrl}/?server=${serverId}`;
@@ -73,18 +70,10 @@ function updateInviteLink(serverId) {
     inviteId.textContent = serverId;
 }
 
-// ================= EVENTOS DOS BOTÕES =================
-createServerBtn.addEventListener('click', () => {
-    openModal('create');
-});
-
-joinServerBtn.addEventListener('click', () => {
-    openModal('join');
-});
-
-cancelServerBtn.addEventListener('click', () => {
-    closeModal();
-});
+// ================= EVENTOS =================
+createServerBtn.addEventListener('click', () => openModal('create'));
+joinServerBtn.addEventListener('click', () => openModal('join'));
+cancelServerBtn.addEventListener('click', closeModal);
 
 confirmServerBtn.addEventListener('click', () => {
     if (modalTitle.textContent === 'Criar Servidor') {
@@ -102,46 +91,31 @@ confirmServerBtn.addEventListener('click', () => {
     }
 });
 
-// Fechar com ESC
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modalOpen) {
-        closeModal();
-    }
+    if (e.key === 'Escape' && modalOpen) closeModal();
 });
 
-// Fechar clicando fora
 serverModal.addEventListener('click', (e) => {
-    if (e.target === serverModal) {
-        closeModal();
-    }
+    if (e.target === serverModal) closeModal();
 });
 
-// Enter nos inputs
 serverNameInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        confirmServerBtn.click();
-    }
+    if (e.key === 'Enter') confirmServerBtn.click();
 });
 
 serverIdInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        confirmServerBtn.click();
-    }
+    if (e.key === 'Enter') confirmServerBtn.click();
 });
 
-// Copiar link de convite
 copyInviteBtn.addEventListener('click', () => {
     inviteLinkInput.select();
-    inviteLinkInput.setSelectionRange(0, 99999);
     document.execCommand('copy');
     alert('✅ Link copiado!');
 });
 
-// Copiar ID
 copyIdBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(currentServerId).then(() => {
-        alert('✅ ID copiado!');
-    });
+    navigator.clipboard.writeText(currentServerId);
+    alert('✅ ID copiado!');
 });
 
 // ================= SOCKET EVENTS =================
@@ -149,12 +123,7 @@ socket.on('connect', () => {
     console.log('✅ Conectado ao servidor');
 });
 
-socket.on('disconnect', () => {
-    console.log('❌ Desconectado do servidor');
-});
-
 socket.on('server-created', (data) => {
-    console.log('🎉 Servidor criado:', data);
     currentServerId = data.serverId;
     sidebar.classList.remove('hidden');
     serverName.textContent = data.serverName;
@@ -163,7 +132,6 @@ socket.on('server-created', (data) => {
 });
 
 socket.on('server-info', (data) => {
-    console.log('📋 Info do servidor:', data);
     currentServerId = data.id;
     sidebar.classList.remove('hidden');
     serverName.textContent = data.name;
@@ -180,62 +148,79 @@ socket.on('server-info', (data) => {
 });
 
 socket.on('channel-created', (channel) => {
-    console.log('➕ Canal criado:', channel);
     addChannelToList(channel);
 });
 
+// ============ WEBRTC EVENTS ============
 socket.on('user-joined', (data) => {
     console.log('👤 Usuário entrou:', data.userId);
-    if (isSharing) {
-        createPeerConnection(data.userId);
-        const pc = peerConnections.get(data.userId);
-        pc.createOffer()
-            .then(offer => pc.setLocalDescription(offer))
-            .then(() => {
-                socket.emit('offer', {
-                    offer: pc.localDescription,
-                    to: data.userId
-                });
-            })
-            .catch(err => console.error('Erro ao criar oferta:', err));
+    console.log('👥 Lista de usuários:', data.userList);
+    
+    // Se EU estou compartilhando, criar conexão com o novo usuário
+    if (isSharing && data.userId !== socket.id) {
+        console.log('📡 Criando conexão com novo usuário:', data.userId);
+        createPeerConnection(data.userId, true);
     }
 });
 
-socket.on('existing-streamers', (streamers) => {
-    console.log('📡 Streamers existentes:', streamers);
-    streamers.forEach(streamerId => {
-        if (streamerId !== socket.id) {
-            createPeerConnection(streamerId);
+socket.on('existing-users', (users) => {
+    console.log('👥 Usuários existentes:', users);
+    
+    // Criar conexões com usuários existentes
+    users.forEach(userId => {
+        if (userId !== socket.id) {
+            console.log('🔗 Criando conexão com:', userId);
+            createPeerConnection(userId, false);
         }
     });
 });
 
+socket.on('stream-started', (data) => {
+    console.log('📡 Stream iniciado por:', data.userId);
+    // O streamer vai criar a conexão
+});
+
+socket.on('stream-stopped', (data) => {
+    console.log('🛑 Stream parado por:', data.userId);
+    removeRemoteVideo(data.userId);
+    if (peerConnections.has(data.userId)) {
+        peerConnections.get(data.userId).close();
+        peerConnections.delete(data.userId);
+    }
+});
+
 socket.on('offer', async (data) => {
     console.log('📥 Recebida oferta de:', data.from);
-    if (!isSharing && localStream) {
-        createPeerConnection(data.from);
-        const pc = peerConnections.get(data.from);
-        try {
-            await pc.setRemoteDescription(data.offer);
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            socket.emit('answer', {
-                answer: pc.localDescription,
-                to: data.from
-            });
-        } catch (err) {
-            console.error('Erro ao processar oferta:', err);
-        }
+    
+    createPeerConnection(data.from, false);
+    const pc = peerConnections.get(data.from);
+    
+    try {
+        await pc.setRemoteDescription(data.offer);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        
+        socket.emit('answer', {
+            answer: pc.localDescription,
+            to: data.from
+        });
+        
+        console.log('📤 Resposta enviada para:', data.from);
+    } catch (err) {
+        console.error('❌ Erro ao processar oferta:', err);
     }
 });
 
 socket.on('answer', async (data) => {
+    console.log('📥 Recebida resposta de:', data.from);
+    
     const pc = peerConnections.get(data.from);
     if (pc) {
         try {
             await pc.setRemoteDescription(data.answer);
+            console.log('✅ Conexão estabelecida com:', data.from);
         } catch (err) {
-            console.error('Erro ao processar resposta:', err);
+            console.error('❌ Erro ao processar resposta:', err);
         }
     }
 });
@@ -246,18 +231,18 @@ socket.on('ice-candidate', async (data) => {
         try {
             await pc.addIceCandidate(data.candidate);
         } catch (err) {
-            console.error('Erro ao adicionar ICE candidate:', err);
+            console.error('❌ Erro ao adicionar ICE:', err);
         }
     }
 });
 
 socket.on('user-left', (userId) => {
     console.log('👋 Usuário saiu:', userId);
+    removeRemoteVideo(userId);
     if (peerConnections.has(userId)) {
         peerConnections.get(userId).close();
         peerConnections.delete(userId);
     }
-    removeRemoteVideo(userId);
 });
 
 socket.on('error', (error) => {
@@ -265,7 +250,7 @@ socket.on('error', (error) => {
     alert('Erro: ' + error);
 });
 
-// ================= FUNÇÕES DE CANAL =================
+// ================= CANAIS =================
 function addChannelToList(channel) {
     const li = document.createElement('li');
     li.className = 'channel-item';
@@ -276,7 +261,6 @@ function addChannelToList(channel) {
 }
 
 function joinChannel(channel) {
-    console.log('🔗 Entrando no canal:', channel.name);
     currentChannelId = channel.id;
     socket.emit('join-channel', { channelId: channel.id });
     
@@ -291,6 +275,8 @@ function joinChannel(channel) {
     
     shareScreenBtn.classList.remove('hidden');
     noContent.classList.add('hidden');
+    
+    console.log('🔗 Entrou no canal:', channel.name);
 }
 
 createChannelBtn.addEventListener('click', () => {
@@ -302,8 +288,6 @@ createChannelBtn.addEventListener('click', () => {
                 channelName: channelName.trim() 
             });
         }
-    } else {
-        alert('Crie ou entre em um servidor primeiro');
     }
 });
 
@@ -319,6 +303,77 @@ const configuration = {
         }
     ]
 };
+
+function createPeerConnection(userId, isInitiator) {
+    console.log('🔗 Criando peer connection com:', userId, 'Iniciador:', isInitiator);
+    
+    // Se já existe, retornar
+    if (peerConnections.has(userId)) {
+        return peerConnections.get(userId);
+    }
+    
+    const pc = new RTCPeerConnection(configuration);
+    peerConnections.set(userId, pc);
+    
+    // Adicionar tracks locais se estiver compartilhando
+    if (localStream) {
+        localStream.getTracks().forEach(track => {
+            pc.addTrack(track, localStream);
+            console.log('➕ Track adicionada:', track.kind);
+        });
+    }
+    
+    // Receber stream remoto
+    pc.ontrack = (event) => {
+        console.log('📺 Recebendo stream de:', userId);
+        console.log('🎥 Streams:', event.streams.length);
+        
+        if (event.streams.length > 0) {
+            addRemoteVideo(userId, event.streams[0]);
+        }
+    };
+    
+    // ICE Candidate
+    pc.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('ice-candidate', {
+                candidate: event.candidate,
+                to: userId
+            });
+        }
+    };
+    
+    // Estado da conexão
+    pc.onconnectionstatechange = () => {
+        console.log('🔄 Estado da conexão com', userId, ':', pc.connectionState);
+        
+        if (pc.connectionState === 'connected') {
+            console.log('✅ Conectado com sucesso a:', userId);
+        } else if (pc.connectionState === 'failed') {
+            console.error('❌ Falha na conexão com:', userId);
+        }
+    };
+    
+    // Se for iniciador, criar oferta
+    if (isInitiator) {
+        pc.createOffer()
+            .then(offer => {
+                console.log('📤 Oferta criada para:', userId);
+                return pc.setLocalDescription(offer);
+            })
+            .then(() => {
+                socket.emit('offer', {
+                    offer: pc.localDescription,
+                    to: userId
+                });
+            })
+            .catch(err => {
+                console.error('❌ Erro ao criar oferta:', err);
+            });
+    }
+    
+    return pc;
+}
 
 async function startScreenShare() {
     try {
@@ -338,17 +393,23 @@ async function startScreenShare() {
         
         addLocalVideo(localStream);
         
+        // Notificar servidor
         if (currentChannelId) {
             socket.emit('start-stream', { channelId: currentChannelId });
         }
+        
+        // Criar conexões com todos os usuários no canal
+        // (será feito quando receber 'user-joined' ou 'existing-users')
         
         localStream.getTracks().forEach(track => {
             track.onended = () => {
                 stopScreenShare();
             };
         });
+        
+        console.log('✅ Compartilhamento iniciado');
     } catch (error) {
-        console.error('Erro ao compartilhar tela:', error);
+        console.error('❌ Erro ao compartilhar tela:', error);
         alert('Erro ao compartilhar tela: ' + error.message);
     }
 }
@@ -375,37 +436,6 @@ function stopScreenShare() {
     if (currentChannelId) {
         socket.emit('stop-stream', { channelId: currentChannelId });
     }
-}
-
-function createPeerConnection(userId) {
-    if (peerConnections.has(userId)) {
-        return peerConnections.get(userId);
-    }
-    
-    const pc = new RTCPeerConnection(configuration);
-    peerConnections.set(userId, pc);
-    
-    if (localStream) {
-        localStream.getTracks().forEach(track => {
-            pc.addTrack(track, localStream);
-        });
-    }
-    
-    pc.ontrack = (event) => {
-        console.log('📺 Recebendo track remota de:', userId);
-        addRemoteVideo(userId, event.streams[0]);
-    };
-    
-    pc.onicecandidate = (event) => {
-        if (event.candidate) {
-            socket.emit('ice-candidate', {
-                candidate: event.candidate,
-                to: userId
-            });
-        }
-    };
-    
-    return pc;
 }
 
 function addLocalVideo(stream) {
@@ -439,6 +469,7 @@ function removeLocalVideo() {
 }
 
 function addRemoteVideo(userId, stream) {
+    console.log('➕ Adicionando vídeo remoto de:', userId);
     removeRemoteVideo(userId);
     
     const videoContainer = document.createElement('div');
@@ -457,6 +488,9 @@ function addRemoteVideo(userId, stream) {
     videoContainer.appendChild(video);
     videoContainer.appendChild(label);
     screensContainer.appendChild(videoContainer);
+    
+    remoteStreams.set(userId, stream);
+    console.log('✅ Vídeo remoto adicionado');
 }
 
 function removeRemoteVideo(userId) {
@@ -464,6 +498,7 @@ function removeRemoteVideo(userId) {
     if (videoContainer) {
         videoContainer.remove();
     }
+    remoteStreams.delete(userId);
 }
 
 // ================= EVENT LISTENERS =================
@@ -480,7 +515,6 @@ window.addEventListener('load', () => {
     }
 });
 
-// Cleanup on page unload
 window.addEventListener('beforeunload', () => {
     if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
@@ -489,7 +523,4 @@ window.addEventListener('beforeunload', () => {
 });
 
 console.log('🚀 App carregado com sucesso!');
-console.log('📝 Como usar:');
-console.log('   1. Crie um servidor ou entre em um existente');
-console.log('   2. Compartilhe o link de convite');
-console.log('   3. Clique em "Compartilhar Tela" para transmitir');
+console.log('📝 Logs detalhados ativados para debug');
