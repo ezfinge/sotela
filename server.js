@@ -6,15 +6,30 @@ const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIO(server);
 
+// Configuração do Socket.IO com CORS
+const io = socketIO(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"],
+        credentials: true
+    },
+    allowEIO3: true,
+    transports: ['websocket', 'polling']
+});
+
+// Servir arquivos estáticos
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Estrutura de dados para armazenar servidores e canais
-const servers = new Map(); // serverId -> { id, name, channels: Map() }
-const channels = new Map(); // channelId -> { id, name, serverId, users: Set() }
+// Rota principal
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
-// Função para gerar IDs únicos
+// Estrutura de dados
+const servers = new Map();
+const channels = new Map();
+
 function generateId() {
     return crypto.randomBytes(8).toString('hex');
 }
@@ -23,7 +38,6 @@ function generateId() {
 io.on('connection', (socket) => {
     console.log('Novo cliente conectado:', socket.id);
 
-    // Criar servidor
     socket.on('create-server', (serverName) => {
         const serverId = generateId();
         const channelId = generateId();
@@ -47,7 +61,6 @@ io.on('connection', (socket) => {
         socket.emit('server-created', { serverId, serverName: newServer.name });
     });
 
-    // Entrar em servidor
     socket.on('join-server', (serverId) => {
         const server = servers.get(serverId);
         if (server) {
@@ -55,14 +68,16 @@ io.on('connection', (socket) => {
             socket.emit('server-info', {
                 id: server.id,
                 name: server.name,
-                channels: Array.from(server.channels.values()).map(c => ({ id: c.id, name: c.name }))
+                channels: Array.from(server.channels.values()).map(c => ({ 
+                    id: c.id, 
+                    name: c.name 
+                }))
             });
         } else {
             socket.emit('error', 'Servidor não encontrado');
         }
     });
 
-    // Criar canal
     socket.on('create-channel', (data) => {
         const { serverId, channelName } = data;
         const server = servers.get(serverId);
@@ -78,11 +93,13 @@ io.on('connection', (socket) => {
             server.channels.set(channelId, newChannel);
             channels.set(channelId, newChannel);
             
-            io.to(serverId).emit('channel-created', { id: channelId, name: newChannel.name });
+            io.to(serverId).emit('channel-created', { 
+                id: channelId, 
+                name: newChannel.name 
+            });
         }
     });
 
-    // Entrar em canal
     socket.on('join-channel', (data) => {
         const { channelId } = data;
         const channel = channels.get(channelId);
@@ -90,22 +107,20 @@ io.on('connection', (socket) => {
             socket.join(channelId);
             channel.users.add(socket.id);
             
-            // Notificar outros usuários no canal
             socket.to(channelId).emit('user-joined', { userId: socket.id });
             
-            // Enviar lista de usuários atuais
             const userList = Array.from(channel.users);
             socket.emit('user-list', userList);
             
-            // Se houver um streamer no canal, informar novo usuário
-            const existingStreamers = Array.from(channel.users).filter(id => id !== socket.id);
+            const existingStreamers = Array.from(channel.users).filter(
+                id => id !== socket.id
+            );
             if (existingStreamers.length > 0) {
                 socket.emit('existing-streamers', existingStreamers);
             }
         }
     });
 
-    // Sair do canal
     socket.on('leave-channel', (channelId) => {
         const channel = channels.get(channelId);
         if (channel) {
@@ -115,12 +130,18 @@ io.on('connection', (socket) => {
         }
     });
 
-    // WebRTC - Sinalização
     socket.on('offer', (data) => {
-        socket.to(data.channelId).emit('offer', {
-            offer: data.offer,
-            from: socket.id
-        });
+        if (data.to) {
+            socket.to(data.to).emit('offer', {
+                offer: data.offer,
+                from: socket.id
+            });
+        } else if (data.channelId) {
+            socket.to(data.channelId).emit('offer', {
+                offer: data.offer,
+                from: socket.id
+            });
+        }
     });
 
     socket.on('answer', (data) => {
@@ -138,16 +159,18 @@ io.on('connection', (socket) => {
     });
 
     socket.on('start-stream', (data) => {
-        socket.to(data.channelId).emit('stream-started', { userId: socket.id });
+        socket.to(data.channelId).emit('stream-started', { 
+            userId: socket.id 
+        });
     });
 
     socket.on('stop-stream', (data) => {
-        socket.to(data.channelId).emit('stream-stopped', { userId: socket.id });
+        socket.to(data.channelId).emit('stream-stopped', { 
+            userId: socket.id 
+        });
     });
 
-    // Desconectar
     socket.on('disconnect', () => {
-        // Remover de todos os canais
         channels.forEach((channel, channelId) => {
             if (channel.users.has(socket.id)) {
                 channel.users.delete(socket.id);
@@ -158,11 +181,76 @@ io.on('connection', (socket) => {
     });
 });
 
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => {
-    console.log(`Servidor rodando em http://localhost:${PORT}`);
+// Prevenção de múltiplos listen
+let isListening = false;
+
+function startServer() {
+    if (isListening) {
+        console.log('Servidor já está rodando!');
+        return;
+    }
+
+    const PORT = process.env.PORT || 10000;
+    
+    try {
+        server.listen(PORT, '0.0.0.0', () => {
+            isListening = true;
+            console.log(`✅ Servidor rodando na porta ${PORT}`);
+            console.log(`📱 Acesse: http://localhost:${PORT}`);
+        });
+
+        // Tratamento de erros
+        server.on('error', (error) => {
+            if (error.code === 'EADDRINUSE') {
+                console.error(`❌ Porta ${PORT} já está em uso!`);
+                console.log('Tentando porta alternativa...');
+                
+                // Tentar próxima porta
+                const newPort = parseInt(PORT) + 1;
+                server.listen(newPort, '0.0.0.0', () => {
+                    isListening = true;
+                    console.log(`✅ Servidor rodando na porta ${newPort}`);
+                });
+            } else {
+                console.error('Erro no servidor:', error);
+            }
+        });
+
+    } catch (error) {
+        console.error('Erro ao iniciar servidor:', error);
+    }
+}
+
+// Iniciar servidor apenas uma vez
+startServer();
+
+// Manter o servidor ativo no Render
+setInterval(() => {
+    console.log('💓 Keep alive -', new Date().toISOString());
+}, 300000); // A cada 5 minutos
+
+// Tratamento de erros não capturados
+process.on('uncaughtException', (error) => {
+    console.error('Erro não capturado:', error);
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
+process.on('unhandledRejection', (error) => {
+    console.error('Promise rejeitada:', error);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('Recebido SIGTERM. Encerrando graciosamente...');
+    server.close(() => {
+        console.log('Servidor encerrado');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('Recebido SIGINT. Encerrando...');
+    server.close(() => {
+        console.log('Servidor encerrado');
+        process.exit(0);
+    });
 });
