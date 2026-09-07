@@ -47,7 +47,7 @@ function openModal(mode) {
     serverModal.style.display = 'flex';
     
     if (mode === 'create') {
-        modalTitle.textContent = 'Criar Sala de Transmissão';
+        modalTitle.textContent = 'Criar Sala no SóTela';
         serverNameInput.classList.remove('hidden');
         serverNameInput.style.display = 'block';
         serverNameInput.placeholder = 'Nome da sala';
@@ -55,7 +55,7 @@ function openModal(mode) {
         serverIdInput.style.display = 'none';
         serverNameInput.focus();
     } else {
-        modalTitle.textContent = 'Entrar em Sala';
+        modalTitle.textContent = 'Entrar no SóTela';
         serverNameInput.classList.add('hidden');
         serverNameInput.style.display = 'none';
         serverIdInput.classList.remove('hidden');
@@ -98,6 +98,21 @@ function setQuality(quality) {
     });
     const activeBtn = document.querySelector(`[data-quality="${quality}"]`);
     if (activeBtn) activeBtn.classList.add('active');
+    
+    // Se já estiver transmitindo, aplicar qualidade
+    if (localStream) {
+        const videoTrack = localStream.getVideoTracks()[0];
+        if (videoTrack) {
+            const qualitySettings = qualityOptions[quality];
+            videoTrack.applyConstraints({
+                width: { ideal: qualitySettings.width },
+                height: { ideal: qualitySettings.height },
+                frameRate: { ideal: qualitySettings.fps }
+            }).catch(err => {
+                console.warn('⚠️ Não foi possível aplicar qualidade:', err);
+            });
+        }
+    }
 }
 
 function addQualityControls() {
@@ -130,11 +145,15 @@ function toggleFullscreen(videoContainer) {
     if (!document.fullscreenElement) {
         if (videoContainer.requestFullscreen) {
             videoContainer.requestFullscreen();
+        } else if (videoContainer.webkitRequestFullscreen) {
+            videoContainer.webkitRequestFullscreen();
         }
         videoContainer.classList.add('fullscreen-active');
     } else {
         if (document.exitFullscreen) {
             document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
         }
         videoContainer.classList.remove('fullscreen-active');
     }
@@ -154,7 +173,7 @@ joinServerBtn.addEventListener('click', () => openModal('join'));
 cancelServerBtn.addEventListener('click', closeModal);
 
 confirmServerBtn.addEventListener('click', () => {
-    if (modalTitle.textContent === 'Criar Sala de Transmissão') {
+    if (modalTitle.textContent === 'Criar Sala no SóTela') {
         const name = serverNameInput.value.trim() || 'Minha Sala';
         closeModal();
         socket.emit('create-server', name);
@@ -208,7 +227,7 @@ copyIdBtn.addEventListener('click', () => {
 
 // ================= SOCKET EVENTS =================
 socket.on('connect', () => {
-    console.log('✅ Conectado ao servidor');
+    console.log('✅ Conectado ao SóTela');
 });
 
 socket.on('server-created', (data) => {
@@ -222,7 +241,7 @@ socket.on('server-created', (data) => {
     setupServerUI();
     
     const inviteUrl = `${window.location.origin}/?server=${data.serverId}`;
-    alert(`✅ Sala criada!\n\n🔗 Link de convite:\n${inviteUrl}\n\nCompartilhe este link!`);
+    alert(`✅ Sala criada no SóTela!\n\n🔗 Link de convite:\n${inviteUrl}\n\nCompartilhe este link!`);
 });
 
 socket.on('server-info', (data) => {
@@ -240,6 +259,7 @@ socket.on('user-joined', (data) => {
     console.log('👤 Usuário entrou:', data.userId);
     
     if (isSharing && data.userId !== socket.id) {
+        console.log('📡 Criando conexão com novo usuário:', data.userId);
         createPeerConnection(data.userId, true);
     }
 });
@@ -249,6 +269,7 @@ socket.on('existing-streamers', (streamers) => {
     
     streamers.forEach(userId => {
         if (userId !== socket.id) {
+            console.log('🔗 Criando conexão com transmissor:', userId);
             createPeerConnection(userId, false);
         }
     });
@@ -258,6 +279,7 @@ socket.on('stream-started', (data) => {
     console.log('📡 Transmissão iniciada por:', data.userId);
     
     if (data.userId !== socket.id) {
+        console.log('🔗 Criando conexão para receber:', data.userId);
         createPeerConnection(data.userId, false);
     }
 });
@@ -286,6 +308,8 @@ socket.on('offer', async (data) => {
             answer: pc.localDescription,
             to: data.from
         });
+        
+        console.log('📤 Resposta enviada para:', data.from);
     } catch (err) {
         console.error('❌ Erro ao processar oferta:', err);
     }
@@ -357,6 +381,7 @@ function createPeerConnection(userId, isInitiator) {
     if (localStream) {
         localStream.getTracks().forEach(track => {
             pc.addTrack(track, localStream);
+            console.log('➕ Track adicionada:', track.kind);
         });
     }
     
@@ -425,7 +450,7 @@ async function startScreenShare() {
         
         if (currentServerId) {
             socket.emit('start-stream');
-            console.log('📡 Transmissão iniciada');
+            console.log('📡 Transmissão iniciada, notificando sala');
         }
         
         localStream.getTracks().forEach(track => {
@@ -549,11 +574,13 @@ function toggleScreen(userId) {
         hiddenStreams.add(userId);
         streamData.videoContainer.style.display = 'none';
         addToHiddenList(userId);
+        console.log('🚫 Parou de ver tela de:', userId);
     } else {
         hiddenStreams.delete(userId);
         streamData.videoContainer.style.display = 'block';
         streamData.video.srcObject = streamData.stream;
         removeFromHiddenList(userId);
+        console.log('👁️ Voltou a ver tela de:', userId);
     }
 }
 
@@ -587,6 +614,7 @@ function showHiddenScreen(userId) {
     streamData.videoContainer.style.display = 'block';
     streamData.video.srcObject = streamData.stream;
     removeFromHiddenList(userId);
+    console.log('👁️ Voltou a ver tela de:', userId);
 }
 
 window.showHiddenScreen = showHiddenScreen;
@@ -620,4 +648,5 @@ window.addEventListener('beforeunload', () => {
     peerConnections.forEach(pc => pc.close());
 });
 
-console.log('🚀 App carregado com sucesso!');
+console.log('🚀 SóTela carregado com sucesso!');
+console.log('📝 Sistema de compartilhamento de tela pronto!');
