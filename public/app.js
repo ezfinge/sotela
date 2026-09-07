@@ -1,172 +1,128 @@
-const socket = io({
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionAttempts: 5,
-    reconnectionDelay: 1000
-});
+// Conexão Socket.IO
+const socket = io();
 
-let currentServerId = null;
-let currentChannelId = null;
-let localStream = null;
-let isSharing = false;
-let isCreatingServer = false;
-const peerConnections = new Map();
-const remoteStreams = new Map();
-
-// DOM Elements
-const sidebar = document.getElementById('sidebar');
-const mainContent = document.getElementById('mainContent');
-const screensContainer = document.getElementById('screensContainer');
-const channelList = document.getElementById('channelList');
-const serverName = document.getElementById('serverName');
-const serverLink = document.getElementById('serverLink');
-const createServerBtn = document.getElementById('createServerBtn');
-const joinServerBtn = document.getElementById('joinServerBtn');
-const createChannelBtn = document.getElementById('createChannelBtn');
-const shareScreenBtn = document.getElementById('shareScreenBtn');
-const stopShareBtn = document.getElementById('stopShareBtn');
-const statusIndicator = document.getElementById('statusIndicator');
-const noContent = document.getElementById('noContent');
+// Elementos DOM
 const serverModal = document.getElementById('serverModal');
 const modalTitle = document.getElementById('modalTitle');
 const serverNameInput = document.getElementById('serverNameInput');
 const serverIdInput = document.getElementById('serverIdInput');
 const confirmServerBtn = document.getElementById('confirmServerBtn');
 const cancelServerBtn = document.getElementById('cancelServerBtn');
+const createServerBtn = document.getElementById('createServerBtn');
+const joinServerBtn = document.getElementById('joinServerBtn');
+const sidebar = document.getElementById('sidebar');
+const serverName = document.getElementById('serverName');
+const serverLink = document.getElementById('serverLink');
+const channelList = document.getElementById('channelList');
+const createChannelBtn = document.getElementById('createChannelBtn');
+const shareScreenBtn = document.getElementById('shareScreenBtn');
+const stopShareBtn = document.getElementById('stopShareBtn');
+const screensContainer = document.getElementById('screensContainer');
+const statusIndicator = document.getElementById('statusIndicator');
+const noContent = document.getElementById('noContent');
 
-// Modal functions
-function showModal(mode) {
-    console.log('Mostrando modal:', mode);
+let currentServerId = null;
+let currentChannelId = null;
+let localStream = null;
+let isSharing = false;
+let modalOpen = false;
+const peerConnections = new Map();
+
+// ================= FUNÇÕES DO MODAL =================
+function openModal(mode) {
+    console.log('Abrindo modal:', mode);
+    modalOpen = true;
     serverModal.classList.remove('hidden');
-    serverNameInput.value = '';
-    serverIdInput.value = '';
+    serverModal.classList.add('active');
+    serverModal.style.display = 'flex';
     
     if (mode === 'create') {
         modalTitle.textContent = 'Criar Servidor';
         serverNameInput.classList.remove('hidden');
+        serverNameInput.style.display = 'block';
         serverIdInput.classList.add('hidden');
-        serverNameInput.focus();
+        serverIdInput.style.display = 'none';
     } else {
         modalTitle.textContent = 'Entrar em Servidor';
         serverNameInput.classList.add('hidden');
+        serverNameInput.style.display = 'none';
         serverIdInput.classList.remove('hidden');
-        serverIdInput.focus();
+        serverIdInput.style.display = 'block';
     }
 }
 
-function hideModal() {
+function closeModal() {
     console.log('Fechando modal');
+    modalOpen = false;
     serverModal.classList.add('hidden');
-    serverNameInput.value = '';
-    serverIdInput.value = '';
+    serverModal.classList.remove('active');
+    serverModal.style.display = 'none';
 }
 
-// Função para criar servidor
-function createServer() {
-    if (isCreatingServer) return;
-    
-    const name = serverNameInput.value.trim() || 'Meu Servidor';
-    console.log('Criando servidor:', name);
-    
-    isCreatingServer = true;
-    confirmServerBtn.disabled = true;
-    confirmServerBtn.textContent = 'Criando...';
-    
-    // Emitir evento para criar servidor
-    socket.emit('create-server', name);
-    
-    // Fechar modal imediatamente
-    hideModal();
-    
-    // Resetar botão após um tempo
-    setTimeout(() => {
-        isCreatingServer = false;
-        confirmServerBtn.disabled = false;
-        confirmServerBtn.textContent = 'Confirmar';
-    }, 1000);
-}
-
-// Função para entrar em servidor
-function joinServer() {
-    const serverId = serverIdInput.value.trim();
-    if (serverId) {
-        console.log('Entrando no servidor:', serverId);
-        socket.emit('join-server', serverId);
-        hideModal();
-    } else {
-        alert('Digite o ID do servidor');
-    }
-}
-
-// Event Listeners
+// ================= EVENTOS DOS BOTÕES =================
 createServerBtn.addEventListener('click', () => {
     console.log('Botão criar servidor clicado');
-    showModal('create');
+    openModal('create');
 });
 
 joinServerBtn.addEventListener('click', () => {
     console.log('Botão entrar servidor clicado');
-    showModal('join');
+    openModal('join');
 });
 
 cancelServerBtn.addEventListener('click', () => {
     console.log('Botão cancelar clicado');
-    hideModal();
+    closeModal();
 });
 
-// Fechar modal clicando fora
-serverModal.addEventListener('click', (e) => {
-    if (e.target === serverModal) {
-        hideModal();
-    }
-});
-
-// Fechar modal com ESC
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !serverModal.classList.contains('hidden')) {
-        hideModal();
-    }
-});
-
-// Confirmar ação do modal
 confirmServerBtn.addEventListener('click', () => {
     console.log('Botão confirmar clicado');
     
     if (modalTitle.textContent === 'Criar Servidor') {
-        createServer();
+        const name = serverNameInput.value.trim() || 'Meu Servidor';
+        console.log('Criando servidor:', name);
+        closeModal();
+        socket.emit('create-server', name);
     } else {
-        joinServer();
+        const serverId = serverIdInput.value.trim();
+        if (serverId) {
+            console.log('Entrando no servidor:', serverId);
+            closeModal();
+            socket.emit('join-server', serverId);
+        } else {
+            alert('Digite o ID do servidor');
+        }
     }
 });
 
-// Permitir Enter para confirmar
+// Fechar com ESC
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modalOpen) {
+        closeModal();
+    }
+});
+
+// Fechar clicando fora
+serverModal.addEventListener('click', (e) => {
+    if (e.target === serverModal) {
+        closeModal();
+    }
+});
+
+// Enter nos inputs
 serverNameInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
-        createServer();
+        confirmServerBtn.click();
     }
 });
 
 serverIdInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
-        joinServer();
+        confirmServerBtn.click();
     }
 });
 
-createChannelBtn.addEventListener('click', () => {
-    if (currentServerId) {
-        const channelName = prompt('Nome do canal:');
-        if (channelName && channelName.trim()) {
-            socket.emit('create-channel', { 
-                serverId: currentServerId, 
-                channelName: channelName.trim() 
-            });
-        }
-    } else {
-        alert('Crie ou entre em um servidor primeiro');
-    }
-});
-
-// Socket Event Handlers
+// ================= SOCKET EVENTS =================
 socket.on('connect', () => {
     console.log('Conectado ao servidor');
 });
@@ -178,46 +134,35 @@ socket.on('disconnect', () => {
 socket.on('server-created', (data) => {
     console.log('Servidor criado:', data);
     currentServerId = data.serverId;
-    
-    // Atualizar UI
     sidebar.classList.remove('hidden');
-    noContent.classList.add('hidden');
     serverName.textContent = data.serverName;
-    updateServerLink();
-    
-    // Limpar canais
-    channelList.innerHTML = '';
-    
-    // Entrar no servidor automaticamente
+    serverLink.textContent = `ID: ${data.serverId}`;
+    serverLink.onclick = () => {
+        navigator.clipboard.writeText(data.serverId);
+        alert('ID copiado!');
+    };
     socket.emit('join-server', data.serverId);
-    
-    // Mostrar mensagem de sucesso
-    alert(`Servidor criado! ID: ${data.serverId}\nCompartilhe este ID para convidar pessoas.`);
 });
 
 socket.on('server-info', (data) => {
-    console.log('Informações do servidor:', data);
+    console.log('Info do servidor:', data);
     currentServerId = data.id;
-    serverName.textContent = data.name;
-    updateServerLink();
     sidebar.classList.remove('hidden');
-    noContent.classList.add('hidden');
+    serverName.textContent = data.name;
+    serverLink.textContent = `ID: ${data.id}`;
+    serverLink.onclick = () => {
+        navigator.clipboard.writeText(data.id);
+        alert('ID copiado!');
+    };
     
-    // Limpar lista de canais
     channelList.innerHTML = '';
     data.channels.forEach(channel => {
         addChannelToList(channel);
     });
     
-    // Entrar automaticamente no primeiro canal
     if (data.channels.length > 0) {
         joinChannel(data.channels[0]);
     }
-});
-
-socket.on('error', (error) => {
-    console.error('Erro:', error);
-    alert('Erro: ' + error);
 });
 
 socket.on('channel-created', (channel) => {
@@ -226,7 +171,7 @@ socket.on('channel-created', (channel) => {
 });
 
 socket.on('user-joined', (data) => {
-    console.log('Usuário entrou:', data);
+    console.log('Usuário entrou:', data.userId);
     if (isSharing) {
         createPeerConnection(data.userId);
         const pc = peerConnections.get(data.userId);
@@ -242,10 +187,6 @@ socket.on('user-joined', (data) => {
     }
 });
 
-socket.on('user-list', (userList) => {
-    console.log('Usuários no canal:', userList.length);
-});
-
 socket.on('existing-streamers', (streamers) => {
     console.log('Streamers existentes:', streamers);
     streamers.forEach(streamerId => {
@@ -256,6 +197,7 @@ socket.on('existing-streamers', (streamers) => {
 });
 
 socket.on('offer', async (data) => {
+    console.log('Recebida oferta de:', data.from);
     if (!isSharing && localStream) {
         createPeerConnection(data.from);
         const pc = peerConnections.get(data.from);
@@ -304,7 +246,54 @@ socket.on('user-left', (userId) => {
     removeRemoteVideo(userId);
 });
 
-// WebRTC Functions
+socket.on('error', (error) => {
+    console.error('Erro:', error);
+    alert('Erro: ' + error);
+});
+
+// ================= FUNÇÕES DE CANAL =================
+function addChannelToList(channel) {
+    const li = document.createElement('li');
+    li.className = 'channel-item';
+    li.textContent = `# ${channel.name}`;
+    li.dataset.channelId = channel.id;
+    li.addEventListener('click', () => joinChannel(channel));
+    channelList.appendChild(li);
+}
+
+function joinChannel(channel) {
+    console.log('Entrando no canal:', channel.name);
+    currentChannelId = channel.id;
+    socket.emit('join-channel', { channelId: channel.id });
+    
+    document.querySelectorAll('.channel-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    
+    const channelElement = document.querySelector(`[data-channel-id="${channel.id}"]`);
+    if (channelElement) {
+        channelElement.classList.add('active');
+    }
+    
+    shareScreenBtn.classList.remove('hidden');
+    noContent.classList.add('hidden');
+}
+
+createChannelBtn.addEventListener('click', () => {
+    if (currentServerId) {
+        const channelName = prompt('Nome do canal:');
+        if (channelName && channelName.trim()) {
+            socket.emit('create-channel', { 
+                serverId: currentServerId, 
+                channelName: channelName.trim() 
+            });
+        }
+    } else {
+        alert('Crie ou entre em um servidor primeiro');
+    }
+});
+
+// ================= WEBRTC =================
 const configuration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -333,10 +322,8 @@ async function startScreenShare() {
         statusIndicator.classList.remove('hidden');
         statusIndicator.classList.add('live');
         
-        // Adicionar vídeo local
         addLocalVideo(localStream);
         
-        // Notificar outros
         if (currentChannelId) {
             socket.emit('start-stream', { channelId: currentChannelId });
         }
@@ -391,6 +378,7 @@ function createPeerConnection(userId) {
     }
     
     pc.ontrack = (event) => {
+        console.log('Recebendo track remota de:', userId);
         addRemoteVideo(userId, event.streams[0]);
     };
     
@@ -406,53 +394,9 @@ function createPeerConnection(userId) {
     return pc;
 }
 
-function joinChannel(channel) {
-    currentChannelId = channel.id;
-    socket.emit('join-channel', { channelId: channel.id });
-    
-    document.querySelectorAll('.channel-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    
-    const channelElement = document.querySelector(`[data-channel-id="${channel.id}"]`);
-    if (channelElement) {
-        channelElement.classList.add('active');
-    }
-    
-    shareScreenBtn.classList.remove('hidden');
-    noContent.classList.add('hidden');
-}
-
-function addChannelToList(channel) {
-    const li = document.createElement('li');
-    li.className = 'channel-item';
-    li.textContent = `# ${channel.name}`;
-    li.dataset.channelId = channel.id;
-    li.addEventListener('click', () => joinChannel(channel));
-    channelList.appendChild(li);
-}
-
-function updateServerLink() {
-    serverLink.textContent = `ID do servidor: ${currentServerId}`;
-    serverLink.title = 'Clique para copiar';
-    serverLink.onclick = () => {
-        navigator.clipboard.writeText(currentServerId).then(() => {
-            alert('ID do servidor copiado!');
-        }).catch(() => {
-            // Fallback
-            const textarea = document.createElement('textarea');
-            textarea.value = currentServerId;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            textarea.remove();
-            alert('ID do servidor copiado!');
-        });
-    };
-}
-
 function addLocalVideo(stream) {
     removeLocalVideo();
+    
     const videoContainer = document.createElement('div');
     videoContainer.className = 'screen-item';
     videoContainer.id = 'local-video-container';
@@ -461,8 +405,8 @@ function addLocalVideo(stream) {
     video.id = 'local-video';
     video.autoplay = true;
     video.muted = true;
-    video.srcObject = stream;
     video.playsInline = true;
+    video.srcObject = stream;
     
     const label = document.createElement('div');
     label.className = 'screen-label';
@@ -499,8 +443,6 @@ function addRemoteVideo(userId, stream) {
     videoContainer.appendChild(video);
     videoContainer.appendChild(label);
     screensContainer.appendChild(videoContainer);
-    
-    remoteStreams.set(userId, stream);
 }
 
 function removeRemoteVideo(userId) {
@@ -508,10 +450,9 @@ function removeRemoteVideo(userId) {
     if (videoContainer) {
         videoContainer.remove();
     }
-    remoteStreams.delete(userId);
 }
 
-// Event Listeners para compartilhamento
+// ================= EVENT LISTENERS =================
 shareScreenBtn.addEventListener('click', startScreenShare);
 stopShareBtn.addEventListener('click', stopScreenShare);
 
@@ -523,4 +464,9 @@ window.addEventListener('beforeunload', () => {
     peerConnections.forEach(pc => pc.close());
 });
 
-console.log('App inicializado!');
+console.log('🚀 App carregado com sucesso!');
+console.log('📝 Para testar:');
+console.log('   1. Clique em "Criar Servidor"');
+console.log('   2. Digite um nome');
+console.log('   3. Clique em "Confirmar"');
+console.log('   4. O modal DEVE fechar');
