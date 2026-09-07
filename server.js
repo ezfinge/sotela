@@ -21,8 +21,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Armazenamento
-const servers = new Map(); // serverId -> { id, name, users: Set() }
+const servers = new Map();
 
 function generateId() {
     return crypto.randomBytes(4).toString('hex');
@@ -38,8 +37,10 @@ io.on('connection', (socket) => {
         const newServer = {
             id: serverId,
             name: serverName || 'Servidor',
-            users: new Set([socket.id])
+            users: new Map() // socketId -> { isSharing: false }
         };
+        
+        newServer.users.set(socket.id, { isSharing: false });
         
         servers.set(serverId, newServer);
         socket.join(serverId);
@@ -59,7 +60,7 @@ io.on('connection', (socket) => {
         
         if (server) {
             socket.join(serverId);
-            server.users.add(socket.id);
+            server.users.set(socket.id, { isSharing: false });
             socket.data.serverId = serverId;
             
             // Enviar informações do servidor
@@ -68,27 +69,77 @@ io.on('connection', (socket) => {
                 name: server.name
             });
             
-            // Notificar outros usuários
-            socket.to(serverId).emit('user-joined', { 
-                userId: socket.id,
-                userList: Array.from(server.users)
+            // Enviar lista de usuários que JÁ estão transmitindo
+            const existingStreamers = [];
+            server.users.forEach((userData, userId) => {
+                if (userId !== socket.id && userData.isSharing) {
+                    existingStreamers.push(userId);
+                }
             });
             
-            // Enviar lista de usuários existentes para o novo usuário
-            const existingUsers = Array.from(server.users).filter(id => id !== socket.id);
-            if (existingUsers.length > 0) {
-                socket.emit('existing-users', existingUsers);
+            if (existingStreamers.length > 0) {
+                console.log('📡 Transmissores existentes:', existingStreamers);
+                socket.emit('existing-streamers', existingStreamers);
             }
             
+            // Notificar outros sobre novo usuário
+            socket.to(serverId).emit('user-joined', { 
+                userId: socket.id 
+            });
+            
             console.log('✅ Cliente entrou no servidor:', serverId);
-            console.log('👥 Usuários no servidor:', server.users.size);
         } else {
             socket.emit('error', 'Servidor não encontrado');
         }
     });
 
-    // WEBRTC SINALIZAÇÃO
+    // INICIAR TRANSMISSÃO
+    socket.on('start-stream', () => {
+        const serverId = socket.data.serverId;
+        console.log('📡 Usuário', socket.id, 'iniciou transmissão no servidor', serverId);
+        
+        if (serverId) {
+            const server = servers.get(serverId);
+            if (server) {
+                // Marcar como transmitindo
+                const userData = server.users.get(socket.id);
+                if (userData) {
+                    userData.isSharing = true;
+                }
+                
+                // Notificar TODOS os outros usuários
+                socket.to(serverId).emit('stream-started', { 
+                    userId: socket.id 
+                });
+                
+                console.log('📡 Notificando outros usuários sobre nova transmissão');
+            }
+        }
+    });
+
+    // PARAR TRANSMISSÃO
+    socket.on('stop-stream', () => {
+        const serverId = socket.data.serverId;
+        console.log('🛑 Usuário', socket.id, 'parou transmissão');
+        
+        if (serverId) {
+            const server = servers.get(serverId);
+            if (server) {
+                const userData = server.users.get(socket.id);
+                if (userData) {
+                    userData.isSharing = false;
+                }
+                
+                socket.to(serverId).emit('stream-stopped', { 
+                    userId: socket.id 
+                });
+            }
+        }
+    });
+
+    // OFERTA WEBRTC
     socket.on('offer', (data) => {
+        console.log('📤 Oferta de', socket.id, 'para', data.to);
         if (data.to) {
             socket.to(data.to).emit('offer', {
                 offer: data.offer,
@@ -97,7 +148,9 @@ io.on('connection', (socket) => {
         }
     });
 
+    // RESPOSTA WEBRTC
     socket.on('answer', (data) => {
+        console.log('📥 Resposta de', socket.id, 'para', data.to);
         if (data.to) {
             socket.to(data.to).emit('answer', {
                 answer: data.answer,
@@ -106,29 +159,12 @@ io.on('connection', (socket) => {
         }
     });
 
+    // ICE CANDIDATE
     socket.on('ice-candidate', (data) => {
         if (data.to) {
             socket.to(data.to).emit('ice-candidate', {
                 candidate: data.candidate,
                 from: socket.id
-            });
-        }
-    });
-
-    socket.on('start-stream', (data) => {
-        const serverId = socket.data.serverId;
-        if (serverId) {
-            socket.to(serverId).emit('stream-started', { 
-                userId: socket.id 
-            });
-        }
-    });
-
-    socket.on('stop-stream', (data) => {
-        const serverId = socket.data.serverId;
-        if (serverId) {
-            socket.to(serverId).emit('stream-stopped', { 
-                userId: socket.id 
             });
         }
     });
@@ -144,7 +180,6 @@ io.on('connection', (socket) => {
                 server.users.delete(socket.id);
                 socket.to(serverId).emit('user-left', socket.id);
                 
-                // Remover servidor se vazio
                 if (server.users.size === 0) {
                     servers.delete(serverId);
                     console.log('🗑️ Servidor removido:', serverId);
