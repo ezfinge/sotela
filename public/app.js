@@ -33,29 +33,10 @@ const peerConnections = new Map();
 const remoteStreams = new Map();
 const hiddenStreams = new Set();
 
-// Configurações de qualidade
 const qualityOptions = {
-    high: {
-        label: 'Alta (1080p)',
-        width: 1920,
-        height: 1080,
-        bitrate: 5000000,
-        fps: 60
-    },
-    medium: {
-        label: 'Média (720p)',
-        width: 1280,
-        height: 720,
-        bitrate: 2500000,
-        fps: 30
-    },
-    low: {
-        label: 'Baixa (480p)',
-        width: 854,
-        height: 480,
-        bitrate: 1000000,
-        fps: 24
-    }
+    high: { label: 'Alta (1080p)', width: 1920, height: 1080, fps: 60 },
+    medium: { label: 'Média (720p)', width: 1280, height: 720, fps: 30 },
+    low: { label: 'Baixa (480p)', width: 854, height: 480, fps: 24 }
 };
 
 // ================= MODAL =================
@@ -96,41 +77,21 @@ function updateInviteLink(serverId) {
     inviteId.textContent = serverId;
 }
 
-// ================= CONTROLES DE QUALIDADE =================
+// ================= QUALIDADE =================
 function setQuality(quality) {
     currentQuality = quality;
     console.log('🎥 Qualidade alterada para:', quality);
-    
-    if (localStream) {
-        const videoTrack = localStream.getVideoTracks()[0];
-        if (videoTrack) {
-            videoTrack.applyConstraints({
-                width: qualityOptions[quality].width,
-                height: qualityOptions[quality].height,
-                frameRate: qualityOptions[quality].fps
-            }).catch(err => {
-                console.warn('⚠️ Não foi possível aplicar qualidade:', err);
-            });
-        }
-    }
     
     document.querySelectorAll('.quality-btn').forEach(btn => {
         btn.classList.remove('active');
     });
     const activeBtn = document.querySelector(`[data-quality="${quality}"]`);
-    if (activeBtn) {
-        activeBtn.classList.add('active');
-    }
-    
-    alert(`Qualidade alterada para ${qualityOptions[quality].label}`);
+    if (activeBtn) activeBtn.classList.add('active');
 }
 
 function addQualityControls() {
-    // Remover controles existentes
     const existingControls = document.querySelector('.quality-controls');
-    if (existingControls) {
-        existingControls.remove();
-    }
+    if (existingControls) existingControls.remove();
     
     const qualityContainer = document.createElement('div');
     qualityContainer.className = 'quality-controls';
@@ -145,11 +106,8 @@ function addQualityControls() {
         qualityContainer.appendChild(btn);
     });
     
-    // Inserir após o botão de compartilhar
     const shareControls = document.querySelector('.main-content > div');
-    if (shareControls) {
-        shareControls.appendChild(qualityContainer);
-    }
+    if (shareControls) shareControls.appendChild(qualityContainer);
 }
 
 function setupServerUI() {
@@ -161,15 +119,11 @@ function toggleFullscreen(videoContainer) {
     if (!document.fullscreenElement) {
         if (videoContainer.requestFullscreen) {
             videoContainer.requestFullscreen();
-        } else if (videoContainer.webkitRequestFullscreen) {
-            videoContainer.webkitRequestFullscreen();
         }
         videoContainer.classList.add('fullscreen-active');
     } else {
         if (document.exitFullscreen) {
             document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-            document.webkitExitFullscreen();
         }
         videoContainer.classList.remove('fullscreen-active');
     }
@@ -256,30 +210,41 @@ socket.on('server-info', (data) => {
     setupServerUI();
 });
 
+// ============ EVENTOS DE STREAM ============
 socket.on('user-joined', (data) => {
     console.log('👤 Usuário entrou:', data.userId);
     
+    // Se EU estou transmitindo, criar conexão com o novo usuário
     if (isSharing && data.userId !== socket.id) {
+        console.log('📡 Criando conexão com novo usuário:', data.userId);
         createPeerConnection(data.userId, true);
     }
 });
 
-socket.on('existing-users', (users) => {
-    console.log('👥 Usuários existentes:', users);
+socket.on('existing-streamers', (streamers) => {
+    console.log('📡 Transmissores existentes:', streamers);
     
-    users.forEach(userId => {
+    // Criar conexões com quem já está transmitindo
+    streamers.forEach(userId => {
         if (userId !== socket.id) {
+            console.log('🔗 Criando conexão com transmissor:', userId);
             createPeerConnection(userId, false);
         }
     });
 });
 
 socket.on('stream-started', (data) => {
-    console.log('📡 Stream iniciado por:', data.userId);
+    console.log('📡 Transmissão iniciada por:', data.userId);
+    
+    // Alguém começou a transmitir, criar conexão
+    if (data.userId !== socket.id) {
+        console.log('🔗 Criando conexão para receber transmissão de:', data.userId);
+        createPeerConnection(data.userId, false);
+    }
 });
 
 socket.on('stream-stopped', (data) => {
-    console.log('🛑 Stream parado por:', data.userId);
+    console.log('🛑 Transmissão parada por:', data.userId);
     removeRemoteVideo(data.userId);
     if (peerConnections.has(data.userId)) {
         peerConnections.get(data.userId).close();
@@ -308,10 +273,13 @@ socket.on('offer', async (data) => {
 });
 
 socket.on('answer', async (data) => {
+    console.log('📥 Recebida resposta de:', data.from);
+    
     const pc = peerConnections.get(data.from);
     if (pc) {
         try {
             await pc.setRemoteDescription(data.answer);
+            console.log('✅ Conexão estabelecida com:', data.from);
         } catch (err) {
             console.error('❌ Erro ao processar resposta:', err);
         }
@@ -357,20 +325,28 @@ const configuration = {
 };
 
 function createPeerConnection(userId, isInitiator) {
+    console.log('🔗 Criando peer connection com:', userId, 'Iniciador:', isInitiator);
+    
     if (peerConnections.has(userId)) {
+        console.log('⚠️ Conexão já existe com:', userId);
         return peerConnections.get(userId);
     }
     
     const pc = new RTCPeerConnection(configuration);
     peerConnections.set(userId, pc);
     
+    // Adicionar tracks locais se estiver compartilhando
     if (localStream) {
         localStream.getTracks().forEach(track => {
             pc.addTrack(track, localStream);
+            console.log('➕ Track adicionada:', track.kind);
         });
     }
     
+    // Receber stream remoto
     pc.ontrack = (event) => {
+        console.log('📺 Recebendo stream de:', userId);
+        
         if (event.streams.length > 0) {
             const stream = event.streams[0];
             if (!hiddenStreams.has(userId)) {
@@ -388,6 +364,11 @@ function createPeerConnection(userId, isInitiator) {
         }
     };
     
+    pc.onconnectionstatechange = () => {
+        console.log('🔄 Estado da conexão com', userId, ':', pc.connectionState);
+    };
+    
+    // Se for iniciador (quem está transmitindo), criar oferta
     if (isInitiator) {
         pc.createOffer()
             .then(offer => pc.setLocalDescription(offer))
@@ -396,6 +377,7 @@ function createPeerConnection(userId, isInitiator) {
                     offer: pc.localDescription,
                     to: userId
                 });
+                console.log('📤 Oferta enviada para:', userId);
             })
             .catch(err => console.error('❌ Erro ao criar oferta:', err));
     }
@@ -426,8 +408,10 @@ async function startScreenShare() {
         
         addLocalVideo(localStream);
         
+        // Notificar servidor
         if (currentServerId) {
-            socket.emit('start-stream', {});
+            socket.emit('start-stream');
+            console.log('📡 Transmissão iniciada, notificando servidor');
         }
         
         localStream.getTracks().forEach(track => {
@@ -457,7 +441,7 @@ function stopScreenShare() {
     peerConnections.clear();
     
     if (currentServerId) {
-        socket.emit('stop-stream', {});
+        socket.emit('stop-stream');
     }
 }
 
@@ -496,12 +480,12 @@ function addLocalVideo(stream) {
 
 function removeLocalVideo() {
     const localVideoContainer = document.getElementById('local-video-container');
-    if (localVideoContainer) {
-        localVideoContainer.remove();
-    }
+    if (localVideoContainer) localVideoContainer.remove();
 }
 
 function addRemoteVideo(userId, stream) {
+    console.log('➕ Adicionando vídeo remoto de:', userId);
+    
     const existingVideo = document.getElementById(`remote-video-${userId}`);
     if (existingVideo) return;
     
@@ -540,23 +524,21 @@ function addRemoteVideo(userId, stream) {
     screensContainer.appendChild(videoContainer);
     
     remoteStreams.set(userId, { stream, videoContainer, video });
+    console.log('✅ Vídeo remoto adicionado à página');
 }
 
 function toggleScreen(userId) {
     const streamData = remoteStreams.get(userId);
     if (!streamData) return;
     
-    const { videoContainer, video } = streamData;
-    const toggleBtn = videoContainer.querySelector('.stop-view');
-    
     if (!hiddenStreams.has(userId)) {
         hiddenStreams.add(userId);
-        videoContainer.style.display = 'none';
+        streamData.videoContainer.style.display = 'none';
         addToHiddenList(userId);
     } else {
         hiddenStreams.delete(userId);
-        videoContainer.style.display = 'block';
-        video.srcObject = streamData.stream;
+        streamData.videoContainer.style.display = 'block';
+        streamData.video.srcObject = streamData.stream;
         removeFromHiddenList(userId);
     }
 }
